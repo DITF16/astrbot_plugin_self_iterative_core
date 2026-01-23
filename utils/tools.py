@@ -1,4 +1,5 @@
 import os
+import asyncio
 from pydantic import Field
 from typing import Optional
 from pydantic.dataclasses import dataclass
@@ -203,16 +204,22 @@ class LoadPluginTool(FunctionTool[AstrAgentContext]):
 
         base_path = TOOL_CONFIG.get("plugin_base_dir", "./data/plugins")
 
-        try:
-            all_dirs_on_disk = set()
-            for item in os.listdir(base_path):
-                item_path = os.path.join(base_path, item)
+        def _scan_plugin_dirs(path: str) -> set:
+            """同步扫描插件目录，在线程池中执行"""
+            dirs = set()
+            for item in os.listdir(path):
+                item_path = os.path.join(path, item)
                 if os.path.isdir(item_path):
                     if os.path.exists(os.path.join(item_path, "main.py")) or \
                        os.path.exists(os.path.join(item_path, "metadata.yaml")):
-                        all_dirs_on_disk.add(item)
+                        dirs.add(item)
+            return dirs
+
+        try:
+            all_dirs_on_disk = await asyncio.to_thread(_scan_plugin_dirs, base_path)
         except Exception as e:
             return f"Error scanning plugin directory: {str(e)}"
+
 
         loaded_plugins = ctx.get_all_stars()
         loaded_dir_names = {p.root_dir_name for p in loaded_plugins} if loaded_plugins else set()
