@@ -1,4 +1,16 @@
 {
+    "enable_whitelist": {
+        "description": "是否启用白名单权限控制",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，只有白名单中的用户才能使用自迭代的相关功能。"
+    },
+    "whitelist_users": {
+        "description": "白名单用户列表",
+        "type": "list",
+        "default": [],
+        "hint": "填写允许使用自迭代核心的管理员用户ID"
+    },
     "verbose_steps": {
         "description": "显示步骤提示",
         "type": "bool",

@@ -45,6 +45,24 @@ async def _send_tip(context: ContextWrapper[AstrAgentContext], message: str):
     except Exception:
         pass
 
+def _check_permission(context: ContextWrapper[AstrAgentContext]) -> bool:
+    """检查当前用户是否有权限使用开发者工具"""
+    if not TOOL_CONFIG.get("enable_whitelist", True):
+        return True
+
+    whitelist = TOOL_CONFIG.get("whitelist_users", [])
+    if not whitelist:
+        return False
+
+    try:
+        event = context.context.event
+        user_id = str(event.get_sender_id())
+        return user_id in [str(uid) for uid in whitelist]
+    except Exception:
+        return False
+
+PERMISSION_DENIED_MSG = "你没有最高权限无法对系统的核心功能进行修改！"
+
 
 @dataclass
 class WriteFileTool(FunctionTool[AstrAgentContext]):
@@ -94,6 +112,8 @@ class WriteFileTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         if not file_manager: return "Error: FileManager not initialized."
 
         plugin_name = kwargs.get("plugin_name")
@@ -134,6 +154,8 @@ class ReadFileTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         if not file_manager: return "Error: FileManager not initialized."
         plugin_name = kwargs.get("plugin_name")
         file_path = kwargs.get("file_path")
@@ -160,6 +182,8 @@ class ListFilesTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         if not file_manager: return "Error: FileManager not initialized."
 
         plugin_name = kwargs.get("plugin_name") or kwargs.get("dir_path") or "."
@@ -195,6 +219,8 @@ class LoadPluginTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         ctx = context.context.context
         event = context.context.event
         star_manager: PluginManager = ctx._star_manager
@@ -291,6 +317,8 @@ class CheckLogsTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         if not log_manager: return "Error: LogManager not initialized."
         default_lines = TOOL_CONFIG.get("log_lines_default", 100)
         lines = kwargs.get("lines")
@@ -322,6 +350,8 @@ class ListPluginsTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         ctx = context.context.context
         all_plugins = ctx.get_all_stars()
 
@@ -362,6 +392,8 @@ class UninstallPluginTool(FunctionTool[AstrAgentContext]):
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
+        if not _check_permission(context):
+            return PERMISSION_DENIED_MSG
         plugin_name = kwargs.get("plugin_name")
 
         if not plugin_name:
