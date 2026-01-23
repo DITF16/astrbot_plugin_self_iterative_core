@@ -61,7 +61,7 @@ def _check_permission(context: ContextWrapper[AstrAgentContext]) -> bool:
     except Exception:
         return False
 
-PERMISSION_DENIED_MSG = "你没有最高权限无法对系统的核心功能进行修改！"
+PERMISSION_DENIED_MSG = "此用户没有最高权限无法对系统的核心功能进行修改！"
 
 
 @dataclass
