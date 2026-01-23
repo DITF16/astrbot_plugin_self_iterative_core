@@ -1,4 +1,5 @@
 import logging
+import threading
 from collections import deque
 from datetime import datetime
 
@@ -27,6 +28,7 @@ class LogManager(logging.Handler):
             self.max_history = getattr(config, 'log_max_history', 3000)
 
         self.log_buffer = deque(maxlen=self.max_history)
+        self._buffer_lock = threading.Lock()
 
         formatter = ShanghaiFormatter(
             '[%(asctime)s] [%(name)s] [%(levelname)s]: %(message)s',
@@ -50,15 +52,17 @@ class LogManager(logging.Handler):
                 return
 
             msg = self.format(record)
-            self.log_buffer.append(msg)
+            with self._buffer_lock:
+                self.log_buffer.append(msg)
         except Exception:
             self.handleError(record)
 
     def get_logs(self, lines: int = 50) -> str:
         self._ensure_still_attached()
-        if not self.log_buffer:
-            return "暂无日志记录 (Log buffer is empty)."
-        return "\n".join(list(self.log_buffer)[-lines:])
+        with self._buffer_lock:
+            if not self.log_buffer:
+                return "暂无日志记录 (Log buffer is empty)."
+            return "\n".join(list(self.log_buffer)[-lines:])
 
     def _ensure_still_attached(self):
         """保活机制"""
