@@ -1,3 +1,4 @@
+import os
 from pydantic import Field
 from typing import Optional
 from pydantic.dataclasses import dataclass
@@ -68,6 +69,7 @@ class WriteFileTool(FunctionTool[AstrAgentContext]):
         "       it means the plugin is not loaded. You MUST call 'dev_load_plugin' immediately to install it. "
         "4. FOR MODIFICATIONS: You MUST read the file first to preserve existing logic. "
         "5. Writes are atomic; always write the FULL file content."
+        "6. MANDATORY VERIFICATION: After calling 'dev_write_file', you MUST immediately call 'dev_check_logs' to verify the execution result based on the 'LOG INTERPRETATION RULES' below."
     )
     parameters: dict = Field(
         default_factory=lambda: {
@@ -176,29 +178,22 @@ class ListFilesTool(FunctionTool[AstrAgentContext]):
 class LoadPluginTool(FunctionTool[AstrAgentContext]):
     name: str = "dev_load_plugin"
     description: str = (
-        "Load a NEWLY created plugin into AstrBot. "
-        "USAGE RULE: Call this ONLY when you have created a completely NEW plugin folder. "
-        "DO NOT call this if you are upgrading/modifying an existing function (AstrBot automatically hot-reloads)."
+        "Automatically load all uninstalled plugins."
+        "WHEN TO USE:"
+        "1. After creating a new plugin."
+        "2. When the user asks to 'install', 'load', or 'activate' plugin(s)."
+        "3. After modifying a plugin, if logs only show '检测到文件变化' but not '正在重载/正在载入'."
+        "NO PARAMETERS NEEDED - just call it directly."
     )
     parameters: dict = Field(
         default_factory=lambda: {
             "type": "object",
-            "properties": {
-                "plugin_dir_name": {
-                    "type": "string",
-                    "description": "The directory name of the plugin to load.",
-                },
-            },
-            "required": ["plugin_dir_name"],
+            "properties": {},
+            "required": [],
         }
     )
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        plugin_dir_name = kwargs.get("plugin_dir_name") or kwargs.get("plugin_dir")
-
-        if not plugin_dir_name:
-            return "Error: Missing parameter 'plugin_dir_name'."
-
         ctx = context.context.context
         event = context.context.event
         star_manager: PluginManager = ctx._star_manager
@@ -206,47 +201,57 @@ class LoadPluginTool(FunctionTool[AstrAgentContext]):
         if not star_manager:
             return "Error: Could not access PluginManager."
 
-        await _send_tip(context, f"🔄 正在尝试加载插件: {plugin_dir_name} ...")
+        base_path = TOOL_CONFIG.get("plugin_base_dir", "./data/plugins")
 
         try:
-            success, error_msg = await star_manager.load(specified_dir_name=plugin_dir_name)
-            if success:
-                try:
-                    chain = MessageChain().message(f"✅ 插件 {plugin_dir_name} 加载成功！")
-                    await ctx.send_message(event.unified_msg_origin, chain)
-                except Exception:
-                    pass
-                return f"Plugin '{plugin_dir_name}' loaded successfully! You can now test it."
-            else:
-                # 加载失败时，使用当前人格分析原因
-                try:
-                    provider_id = await ctx.get_current_chat_provider_id(event.unified_msg_origin)
-
-                    prompt = (
-                        f"The plugin '{plugin_dir_name}' failed to load with the following error:\n"
-                        f"{error_msg}\n\n"
-                        f"Please act as your current persona. Briefly analyze this error for the user "
-                        f"and apologize, then confidently state that you are about to fix the code. "
-                        f"Keep it short (under 50 words)."
-                    )
-
-                    llm_resp = await ctx.llm_generate(chat_provider_id=provider_id, prompt=prompt)
-
-                    if llm_resp and llm_resp.completion_text:
-                        chain = MessageChain().message(f"❌ {llm_resp.completion_text}")
-                        await ctx.send_message(event.unified_msg_origin, chain)
-                    else:
-                        chain = MessageChain().message(f"❌ 加载失败: {error_msg}。正在尝试修复...")
-                        await ctx.send_message(event.unified_msg_origin, chain)
-
-                except Exception as e:
-                    chain = MessageChain().message(f"❌ 加载失败，正在自动修复... (Error: {str(e)})")
-                    await ctx.send_message(event.unified_msg_origin, chain)
-
-                return f"Failed to load plugin '{plugin_dir_name}'. Error: {error_msg}. Please check the logs."
-
+            all_dirs_on_disk = set()
+            for item in os.listdir(base_path):
+                item_path = os.path.join(base_path, item)
+                if os.path.isdir(item_path):
+                    if os.path.exists(os.path.join(item_path, "main.py")) or \
+                       os.path.exists(os.path.join(item_path, "metadata.yaml")):
+                        all_dirs_on_disk.add(item)
         except Exception as e:
-            return f"Exception during loading: {str(e)}"
+            return f"Error scanning plugin directory: {str(e)}"
+
+        loaded_plugins = ctx.get_all_stars()
+        loaded_dir_names = {p.root_dir_name for p in loaded_plugins} if loaded_plugins else set()
+
+        unloaded_dirs = all_dirs_on_disk - loaded_dir_names
+
+        if not unloaded_dirs:
+            return (
+                "All plugins already loaded. "
+                f"({len(loaded_dir_names)} plugins active)"
+            )
+
+        results = []
+        success_count = 0
+        fail_count = 0
+
+        for dir_name in sorted(unloaded_dirs):
+            try:
+                success, error_msg = await star_manager.load(specified_dir_name=dir_name)
+                if success:
+                    results.append(f"✅ {dir_name}")
+                    success_count += 1
+                else:
+                    results.append(f"❌ {dir_name}: {error_msg}")
+                    fail_count += 1
+            except Exception as e:
+                results.append(f"❌ {dir_name}: {str(e)}")
+                fail_count += 1
+
+        try:
+            if success_count > 0:
+                msg = f"✅ 已加载 {success_count} 个新插件" + (f"，{fail_count} 个失败" if fail_count else "")
+                chain = MessageChain().message(msg)
+                await ctx.send_message(event.unified_msg_origin, chain)
+        except Exception:
+            pass
+
+        return f"Loaded {success_count}, Failed {fail_count}. Details:\n" + "\n".join(results)
+
 
 
 @dataclass
@@ -263,7 +268,7 @@ class CheckLogsTool(FunctionTool[AstrAgentContext]):
         "4. RELOAD STATUS: "
         "   - 'File changed' + 'Loading/Reloading' = Success. "
         "   - 'File changed' + Error = Fix it. "
-        "   - 'File changed' ONLY (no other msg) = Plugin not active. Call 'dev_load_plugin'. "
+        "   - 'File changed' ONLY (no other msg) = Plugin not installed. Call 'dev_load_plugin'. "
     )
     parameters: dict = Field(
         default_factory=lambda: {
