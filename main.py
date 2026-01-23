@@ -24,3 +24,7 @@ class PluginDeveloper(Star):
     @filter.command("自迭代测试")
     async def ping(self, event: AstrMessageEvent):
         yield event.plain_result("自迭代核心已加载，配置已生效✅️")
+
+    async def terminate(self):
+        if log_manager is not None:
+            log_manager.shutdown()
