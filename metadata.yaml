@@ -1,6 +1,6 @@
 name: astrbot_plugin_self_iterative_core
 display_name: 自迭代核心
-version: 1.0.1
+version: 1.0.2
 description: ai自动升级完善自身功能的核心模块
 author: DITF16
 repo: https://github.com/DITF16/astrbot_plugin_self_iterative_core

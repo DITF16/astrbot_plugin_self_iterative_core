@@ -104,7 +104,7 @@ class WriteFileTool(FunctionTool[AstrAgentContext]):
 
         await _send_tip(context, f"📝 正在编写文件: {plugin_name}/{file_path} ...")
 
-        result = file_manager.write_file(plugin_name, file_path, content)
+        result = await file_manager.write_file(plugin_name, file_path, content)
 
         return (
             f"{result}\n"
@@ -137,7 +137,7 @@ class ReadFileTool(FunctionTool[AstrAgentContext]):
         plugin_name = kwargs.get("plugin_name")
         file_path = kwargs.get("file_path")
         await _send_tip(context, f"📖 正在读取文件: {plugin_name}/{file_path} ...")
-        content = file_manager.read_file(plugin_name, file_path)
+        content = await file_manager.read_file(plugin_name, file_path)
         return content
 
 
@@ -168,7 +168,7 @@ class ListFilesTool(FunctionTool[AstrAgentContext]):
         if not plugin_name: plugin_name = "."
 
         try:
-            result = file_manager.list_files(plugin_name)
+            result = await file_manager.list_files(plugin_name)
             return result
         except Exception as e:
             return f"Error listing files: {str(e)}"
