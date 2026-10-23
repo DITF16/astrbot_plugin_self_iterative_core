@@ -41,9 +41,11 @@ class KnowledgeStore:
                 CREATE TABLE IF NOT EXISTS profile_revisions(
                     id INTEGER PRIMARY KEY, key TEXT NOT NULL, profile TEXT NOT NULL,
                     created TEXT DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE IF NOT EXISTS retired_keys(key TEXT PRIMARY KEY);
                 """
             )
-            db.execute("PRAGMA user_version=2")
+            if db.execute("PRAGMA user_version").fetchone()[0] < 2:
+                db.execute("PRAGMA user_version=2")
 
     @contextmanager
     def connect(self):
@@ -162,7 +164,6 @@ class KnowledgeStore:
                 raise ValueError("Knowledge entry not found")
             for target in [
                 *(related or []),
-                *(members or []),
                 *([replacement] if replacement else []),
             ]:
                 if (
@@ -204,6 +205,23 @@ class KnowledgeStore:
     def save_with_profile(self, args):
         """Commit content and explicit metadata together, preserving unspecified fields."""
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM retired_keys WHERE key=?", (args["key"],)
+            ).fetchone():
+                raise ValueError(
+                    "Retired duplicate key; update the current knowledge card instead"
+                )
+            old = db.execute(
+                "SELECT * FROM entries WHERE key=?", (args["key"],)
+            ).fetchone()
+            if old:
+                if args.get("expected_revision") != old["revision"]:
+                    raise ValueError(
+                        "Knowledge revision conflict; read the current entry and retry"
+                    )
+            elif args.get("expected_revision", 0) != 0:
+                raise ValueError("Knowledge entry no longer exists")
             previous = db.execute(
                 "SELECT * FROM entry_profiles WHERE key=?", (args["key"],)
             ).fetchone()
@@ -225,13 +243,90 @@ class KnowledgeStore:
             ):
                 if field in args:
                     profile[field] = args[field]
+            fields = {
+                k: args.get(k, old[k] if old else None)
+                for k in ("key", "category", "title", "content", "source")
+            }
             entry = self.save(
-                *(args[k] for k in ("key", "category", "title", "content", "source")),
-                args.get("kind", "reference"),
+                *(fields[k] for k in ("key", "category", "title", "content", "source")),
+                args.get("kind", old["kind"] if old else "reference"),
                 _db=db,
             )
             self.set_profile(args["key"], **profile, _db=db)
+            if old and self.read_revision(db, entry) == old["revision"]:
+                db.execute(
+                    "UPDATE entries SET revision=revision+1,updated=CURRENT_TIMESTAMP WHERE id=?",
+                    (entry,),
+                )
+                db.execute(
+                    "INSERT INTO revisions SELECT id,revision,category,title,content,source FROM entries WHERE id=?",
+                    (entry,),
+                )
             return entry
+
+    @staticmethod
+    def read_revision(db, entry):
+        return db.execute(
+            "SELECT revision FROM entries WHERE id=?", (entry,)
+        ).fetchone()[0]
+
+    def compact(self):
+        """Remove redundant source copies; retain current cards and local corrections."""
+        with self.connect() as db:
+            cards = db.execute(
+                "SELECT e.*,p.members FROM entries e JOIN entry_profiles p USING(key) WHERE e.key LIKE 'card:%'"
+            ).fetchall()
+            migrated = set()
+            for card in cards:
+                content = card["content"]
+                for key in json.loads(card["members"]):
+                    original = db.execute(
+                        "SELECT e.*,p.origin FROM entries e LEFT JOIN entry_profiles p USING(key) WHERE e.key=?",
+                        (key,),
+                    ).fetchone()
+                    if (
+                        original
+                        and original["origin"] != "packaged"
+                        and original["revision"] > 1
+                    ):
+                        baseline = db.execute(
+                            "SELECT content FROM revisions WHERE entry_id=? ORDER BY revision LIMIT 1",
+                            (original["id"],),
+                        ).fetchone()
+                        if baseline and baseline[0] in content:
+                            content = content.replace(baseline[0], original["content"])
+                            migrated.add(key)
+                    elif original:
+                        migrated.add(key)
+                if content != card["content"]:
+                    self.save(
+                        card["key"],
+                        card["category"],
+                        card["title"],
+                        content,
+                        card["source"],
+                        card["kind"],
+                        _db=db,
+                    )
+            for row in db.execute(
+                "SELECT e.id,e.key,e.revision,p.origin,p.status FROM entries e LEFT JOIN entry_profiles p USING(key) WHERE e.key NOT LIKE 'card:%'"
+            ).fetchall():
+                if row["key"] not in migrated and not (
+                    row["origin"] == "packaged" and row["status"] != "active"
+                ):
+                    continue
+                db.execute(
+                    "INSERT OR IGNORE INTO retired_keys VALUES(?)", (row["key"],)
+                )
+                db.execute("DELETE FROM consultations WHERE entry_id=?", (row["id"],))
+                db.execute("DELETE FROM revisions WHERE entry_id=?", (row["id"],))
+                db.execute("DELETE FROM profile_revisions WHERE key=?", (row["key"],))
+                db.execute("DELETE FROM entry_profiles WHERE key=?", (row["key"],))
+                db.execute("DELETE FROM entries WHERE id=?", (row["id"],))
+            db.execute("DELETE FROM sources")
+            db.execute("PRAGMA user_version=3")
+        with self.connect() as db:
+            db.execute("VACUUM")
 
     def search(
         self, query="", category="", limit=6, purpose="lookup", include_archived=False
@@ -266,7 +361,16 @@ class KnowledgeStore:
                     5 * (t in heading) + 4 * (t in labels) + (t in body) for t in tokens
                 )
                 score += sum(
-                    15 for alias in [*aliases, *apis] if alias.lower() in query.lower()
+                    15
+                    for alias in [*aliases, *apis]
+                    if re.search(
+                        r"(?<![a-zA-Z_0-9])"
+                        + re.escape(alias.lower())
+                        + r"(?![a-zA-Z_0-9])"
+                        if re.search(r"[a-zA-Z]", alias)
+                        else re.escape(alias.lower()),
+                        query.lower(),
+                    )
                 )
                 if query.strip() == row["key"]:
                     score += 10000
@@ -421,11 +525,23 @@ class KnowledgeStore:
             seed: Packaged SQLite reference database path.
         """
         with closing(sqlite3.connect(seed)) as source, self.connect() as db:
+            retired = source.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='retired_keys'"
+            ).fetchone()
+            if retired:
+                db.executemany(
+                    "INSERT OR IGNORE INTO retired_keys VALUES(?)",
+                    source.execute("SELECT key FROM retired_keys"),
+                )
             for row in source.execute("SELECT name,sha256,raw FROM sources"):
                 db.execute("INSERT OR IGNORE INTO sources VALUES(?,?,?)", row)
             for row in source.execute(
                 "SELECT key,kind,category,title,content,source FROM entries"
             ):
+                if db.execute(
+                    "SELECT 1 FROM retired_keys WHERE key=?", (row[0],)
+                ).fetchone():
+                    continue
                 # Runtime edits take precedence over packaged references on upgrades.
                 db.execute(
                     "INSERT OR IGNORE INTO entries"
@@ -454,6 +570,10 @@ class KnowledgeStore:
                 "SELECT 1 FROM sqlite_master WHERE name='entry_profiles'"
             ).fetchone():
                 for profile in source.execute("SELECT * FROM entry_profiles"):
+                    if not db.execute(
+                        "SELECT 1 FROM entries WHERE key=?", (profile[0],)
+                    ).fetchone():
+                        continue
                     existing = db.execute(
                         "SELECT origin FROM entry_profiles WHERE key=?", (profile[0],)
                     ).fetchone()
@@ -492,6 +612,9 @@ class KnowledgeStore:
                             "INSERT INTO profile_revisions(key,profile) VALUES(?,?)",
                             (profile[0], serialized),
                         )
+        with closing(sqlite3.connect(seed)) as source:
+            if source.execute("PRAGMA user_version").fetchone()[0] >= 3:
+                self.compact()
 
     def record_failure(self, stage, target, error):
         digest = hashlib.sha256(f"{stage}:{error}".encode()).hexdigest()[:20]

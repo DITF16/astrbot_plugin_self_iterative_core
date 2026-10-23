@@ -85,7 +85,7 @@
 
 ## 🛠️ 安装与使用 | Installation & Usage
 
-### v1.3.0 开发流程
+### v1.3.1 开发流程
 
 要求 AstrBot `>=4.29.1,<5`。先配置白名单用户 ID；默认空白名单不允许调用开发工具。
 
@@ -116,17 +116,17 @@ python scripts/rollback_plugin.py --plugin-root "D:/AstrBot/data/plugins" --data
 
 将示例路径替换为实际宿主路径，恢复后启动 AstrBot。自迭代核心自身也可按同样方式恢复。
 
-### 开发资料存储
+### 开发资料存储与运行时更新
 
-原 `astrbot_dev_knowledge/*.md` 已转换为 SQLite：按实际章节划分插件配置、事件与指令、消息格式、消息发送、LLM工具与Agent、会话历史、人格、存储、HTTP接口等分类。每个源文件的原始字节和 SHA256 存在 `sources` 表中，可完整导出；原 Markdown 在逐字节和数据库完整性校验通过后删除。代码块内的 `#` 不作为章节标题。
+安装包的 `knowledge/seed.sqlite3` 只保留 46 个当前知识块，不再保存原 Markdown 字节和旧章节正文。分类、任务别名、API 和关联关系来自手工整理。旧章节只保留退休 key，防止升级重新导入；正文与索引修订历史不参与检索。目录校验脚本仅检查条目标识，不重建、覆盖当前知识。
 
-v1.3.0 通读 15 份源资料后，按编写任务手工组织为 46 个知识块：配置字段与运行时读取、消息对象与发送、LLM 调用与工具、历史与人格、会话等待、存储、渲染、平台适配、HTTP 接口、宿主配置及错误经验等。分类、原文成员、摘要、API 别名和关联关系显式保存在 `knowledge/catalog.py`；`scripts/build_catalog.py` 只将这些决定写入数据库并检查原 216 条资料的覆盖，不自动判断分类。相关示例和说明保存在同一块正文中，原章节归档可用 `include_archived=true` 查询；有误的存储示例标记了替代条目。
+运行中的知识保存在插件数据目录的 `knowledge.sqlite3`，安装包提供首次导入和未改条目的更新。`dev_save_knowledge` 按稳定 key 修改同一条知识：先搜索、读取，传 `expected_revision` 和需要改的字段即可；不必重复提交正文。新建条目需要 key、category、title、content、source，可补充 summary、aliases、apis、related、applicability、verification。已有条目的正文、分类、摘要、索引和状态均可分别更新；正文和索引在一个事务中保存，过期修订号会拒绝写入，要求重读后重试。
 
-`entry_profiles` 保存摘要、任务别名、API、关联条目、原文成员、状态和适用性，`profile_revisions` 保存索引修订。运行时用 `dev_save_knowledge` 补充 `summary`、`aliases`、`apis`、`related`、`applicability`、`verification` 等字段；`related` 使用已有条目的稳定 key。分类可以随实际开发新增或调整。验证状态区分原文资料 `documented`、源码核对 `source_checked`、实际测试 `tested`、错误观察 `observed`。重复出现同一错误不会覆盖已补充的诊断。
+保存后下次查询立即读取新内容，无需重启或重建索引。`status=archived` 可停用无效条目，日常查询与关联检索将排除它；`include_archived=true` 用于管理停用条目。本地修改及停用状态在重载、升级后保留。分类改名或合并继续使用 `dev_knowledge_categories`。模型应修正已有 key，避免为同一问题新增互相冲突的副本。
 
-检索采用关键词、手工别名及 API 匹配；多主题查询分别保留候选及关联索引，减少一个主题挤占全部结果的情况。它仍可能遗漏不同表述，应结合分类浏览、改写查询和宿主源码核对；资料覆盖检查只证明原条目有去向，不代表所有示例都已实测或覆盖所有未来需求。
+旧运行库升级会清理打包原文副本；已修改的旧章节能够匹配知识块中的原片段时，会将纠正合入当前知识块。如果匹配失败，保留本地修改，避免丢失用户知识，需要后续人工或模型合并。原始来源名称和位置可作为来源信息保留，不保存第二份原文。
 
-`scripts/migrate_knowledge.py` 可迁移新增 Markdown 资料，`--delete-originals` 仅在数据库完整性和全部源文件字节校验通过后删除源文件。已有运行库中的分类和正文修订优先保留。
+错误首次出现记录为 observed，诊断后更新同一条目的原因、修复及实际验证，可标记 source_checked 或 tested；重复错误不覆盖已有诊断。每次发现知识不全或错误，都通过运行时工具补充当前版本。关键词和手工别名检索仍可能遗漏不同表述，需要分主题查询及核对宿主源码。
 
 ### 验证与边界
 

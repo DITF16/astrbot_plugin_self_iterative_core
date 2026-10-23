@@ -1,12 +1,10 @@
 """Curated retrieval, provenance and local upgrade regression tests."""
 
-import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 
 from knowledge.catalog import CARDS
-from scripts.build_catalog import build
 from utils.knowledge import KnowledgeStore
 
 SEED = Path(__file__).resolve().parents[1] / "knowledge/seed.sqlite3"
@@ -22,12 +20,10 @@ class CatalogTests(unittest.TestCase):
     def test_sources_and_complete_manual_coverage(self):
         with self.store.connect() as db:
             sources = db.execute("SELECT raw,sha256 FROM sources").fetchall()
-            self.assertEqual(len(sources), 15)
-            for raw, digest in sources:
-                self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
-        self.assertEqual(
-            build(self.store.path), {"cards": 46, "original_entries_accounted_for": 216}
-        )
+            self.assertEqual(len(sources), 0)
+            self.assertEqual(
+                db.execute("SELECT count(*) FROM entries").fetchone()[0], 46
+            )
         self.assertEqual(len(CARDS), 46)
 
     def test_natural_language_and_api_retrieval(self):
@@ -61,9 +57,9 @@ class CatalogTests(unittest.TestCase):
             row = db.execute(
                 "SELECT status,replacement FROM entry_profiles WHERE key='doc:storage.md:2'"
             ).fetchone()
-        self.assertEqual(tuple(row), ("superseded", "card:storage-files"))
+        self.assertIsNone(row)
         archived = self.store.search("storage", include_archived=True, limit=12)
-        self.assertTrue(any(h["status"] != "active" for h in archived))
+        self.assertTrue(all(h["status"] == "active" for h in archived))
 
     def test_profile_failure_rolls_back_content(self):
         args = {
@@ -89,6 +85,7 @@ class CatalogTests(unittest.TestCase):
         self.store.save_with_profile(
             {
                 "key": hit["key"],
+                "expected_revision": self.store.read(hit["id"])["revision"],
                 "category": "local-config",
                 "title": hit["title"],
                 "content": "local correction",
@@ -106,6 +103,7 @@ class CatalogTests(unittest.TestCase):
         self.store.save_with_profile(
             {
                 "key": item["key"],
+                "expected_revision": item["revision"],
                 "category": "lessons",
                 "title": "diagnosed",
                 "content": "verified fix",
@@ -126,6 +124,10 @@ class CatalogTests(unittest.TestCase):
                 *(row[k] for k in ("key", "category", "title", "content", "source")),
                 row["kind"],
             )
+        if not rows:
+            legacy.save("custom", "local", "title", "old", "test")
+            with legacy.connect() as db:
+                rows = db.execute("SELECT * FROM entries").fetchall()
         changed = rows[0]
         entry = legacy.save(
             changed["key"],
@@ -158,3 +160,45 @@ class CatalogTests(unittest.TestCase):
         upgraded = self.store.read(item["id"])
         self.assertEqual(upgraded["content"], "new package content")
         self.assertEqual(upgraded["profile"]["summary"], "new package summary")
+
+    def test_partial_update_is_immediate_and_rejects_stale_revision(self):
+        hit = self.store.search("card:llm-generate", limit=1)[0]
+        args = {
+            "key": hit["key"],
+            "expected_revision": hit["revision"],
+            "summary": "freshsummaryunique",
+            "aliases": ["freshaliasunique"],
+        }
+        self.store.save_with_profile(args)
+        updated = self.store.read(hit["id"])
+        self.assertEqual(updated["profile"]["summary"], "freshsummaryunique")
+        self.assertGreater(updated["revision"], hit["revision"])
+        self.assertEqual(
+            self.store.search("freshaliasunique", limit=1)[0]["key"], hit["key"]
+        )
+        with self.assertRaises(ValueError):
+            self.store.save_with_profile(args)
+        self.store.save_with_profile(
+            {
+                "key": hit["key"],
+                "expected_revision": updated["revision"],
+                "status": "archived",
+            }
+        )
+        self.assertEqual(self.store.search("freshaliasunique"), [])
+        self.store.import_seed(SEED)
+        self.assertEqual(self.store.search("freshaliasunique"), [])
+
+    def test_legacy_duplicate_correction_is_merged(self):
+        legacy = KnowledgeStore(self.store.path.parent / "legacy-merge.sqlite3")
+        original = legacy.save("doc:old", "config", "old", "old example", "test")
+        legacy.save("card:test", "config", "current", "intro old example end", "test")
+        legacy.set_profile("card:test", members=["doc:old"], origin="packaged")
+        legacy.save("doc:old", "config", "old", "corrected example", "test evidence")
+        legacy.compact()
+        with self.assertRaises(ValueError):
+            legacy.read(original)
+        self.assertEqual(
+            legacy.search("corrected example")[0]["content"],
+            "intro corrected example end",
+        )

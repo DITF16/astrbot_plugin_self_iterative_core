@@ -141,7 +141,8 @@ class DeveloperRuntime:
             }
         if operation == "dev_save_knowledge":
             entry = await asyncio.to_thread(self.knowledge.save_with_profile, args)
-            return {"ok": True, "entry_id": entry}
+            current = await asyncio.to_thread(self.knowledge.read, entry)
+            return {"ok": True, "entry_id": entry, "revision": current["revision"]}
         if operation == "dev_knowledge_categories":
             if args.get("old") or args.get("new"):
                 await asyncio.to_thread(
@@ -420,9 +421,12 @@ def create_tools(runtime):
             "dev_save_knowledge",
             "Add/correct documentation or summarize errors with evidence. "
             "Use a stable key to revise entries; kind is reference or experience. "
+            "Read existing entries first and pass expected_revision; update only changed fields. "
+            "New entries need category/title/content/source. Correct the existing key instead of duplicating it. "
             "Include symptom, cause, fix, actual validation and version. Mark untested fixes as pending. "
             "New category names create categories automatically.",
             {
+                "expected_revision": integer,
                 **dict.fromkeys(
                     (
                         "key",
@@ -450,7 +454,7 @@ def create_tools(runtime):
                     "enum": ["documented", "source_checked", "tested", "observed"],
                 },
             },
-            ["key", "category", "title", "content", "source"],
+            ["key"],
         ),
         (
             "dev_knowledge_categories",
