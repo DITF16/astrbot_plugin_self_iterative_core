@@ -1,413 +1,431 @@
-import os
+"""Developer tools backed by per-plugin runtime state."""
+
 import asyncio
+import json
+import logging
+import time
+from pathlib import Path
+
 from pydantic import Field
-from typing import Optional
 from pydantic.dataclasses import dataclass
-from astrbot.api.event import MessageChain
-from astrbot.core.agent.run_context import ContextWrapper
+
 from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_context import AstrAgentContext
-from astrbot.core.star.star_manager import PluginManager
-
 
 from .file_manager import FileManager
+from .knowledge import KnowledgeStore
 from .log_manager import LogManager
 
-file_manager: Optional[FileManager] = None
-log_manager: Optional[LogManager] = None
-TOOL_CONFIG: dict = {}
 
+class DeveloperRuntime:
+    def __init__(self, context, config, data_path, plugin_path):
+        self.context = context
+        self.config = config
+        self.data_path = Path(data_path)
+        self.files = FileManager(plugin_path, data_path)
+        self.knowledge = KnowledgeStore(self.data_path / "knowledge.sqlite3")
+        self.lock = asyncio.Lock()
+        self.logs = None
+        self.closed = False
 
-def init_managers(config: dict):
-    """根据传入的配置初始化管理器"""
-    global file_manager, log_manager, TOOL_CONFIG
-    TOOL_CONFIG = config if config else {}
-
-    base_path = config.get("plugin_base_dir", "./data/plugins")
-    file_manager = FileManager(base_path=base_path)
-    if log_manager is not None:
-        try:
-            log_manager.shutdown()
-        except Exception:
-            pass
-
-    log_manager = LogManager(config=config)
-
-async def _send_tip(context: ContextWrapper[AstrAgentContext], message: str):
-    if not TOOL_CONFIG.get("verbose_steps", True):
-        return
-
-    try:
-        ctx = context.context.context
-        event = context.context.event
-        chain = MessageChain().message(message)
-        await ctx.send_message(event.unified_msg_origin, chain)
-    except Exception:
-        pass
-
-def _check_permission(context: ContextWrapper[AstrAgentContext]) -> bool:
-    """检查当前用户是否有权限使用开发者工具"""
-    if not TOOL_CONFIG.get("enable_whitelist", True):
-        return True
-
-    whitelist = TOOL_CONFIG.get("whitelist_users", [])
-    if not whitelist:
-        return False
-
-    try:
-        event = context.context.event
-        user_id = str(event.get_sender_id())
-        return user_id in [str(uid) for uid in whitelist]
-    except Exception:
-        return False
-
-PERMISSION_DENIED_MSG = "此用户没有最高权限无法对系统的核心功能进行修改！"
-
-
-@dataclass
-class WriteFileTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_write_file"
-    description: str = (
-        "Write full content to a file to create or modify a plugin. "
-        "CRITICAL RULES FOR DEBUGGING & FIXING: "
-        "1. STOP! Do NOT guess the code if you are fixing a bug (especially API errors). "
-        "2. EXECUTION ORDER: "
-        "   (A) Call 'dev_check_logs' to get the traceback. "
-        "   (B) Call 'dev_read_file' to inspect the buggy code. "
-        "   (C) Call 'astr_kb_search' (if available) to verify the correct API usage. "
-        "   (D) [FALLBACK] If 'astr_kb_search' is unhelpful or unavailable, you MUST use a web search tool "
-        "       (e.g. 'web_search_tavily', 'fetch_url') to search the official docs at 'https://docs.astrbot.app/'. "
-        "       Keywords: '最小实例', '主动消息', '定义 Tool', '注册 Tool'. "
-        "   (E) ONLY THEN call 'dev_write_file' to apply the fix. "
-        "3. LOG INTERPRETATION RULES (AFTER WRITING): "
-        "   (A) NO USER COMMAND IN LOGS: If logs don't show the user's command, it means the user hasn't sent it yet. "
-        "       THIS IS NORMAL. It is NOT an error. Do NOT try to fix the code. Just inform the user to test it. "
-        "   (B) RELOAD SUCCESS: If logs show 'File changed' AND ('Loading plugin...' OR 'Reloading...'), the fix is applied. "
-        "   (C) RELOAD ERROR: If logs show 'File changed' AND an Error/Traceback follows, the fix failed. Try again. "
-        "   (D) NOT INSTALLED: If logs show 'File changed' BUT there is NO 'Loading/Reloading' message afterwards, "
-        "       it means the plugin is not loaded. You MUST call 'dev_load_plugin' immediately to install it. "
-        "4. FOR MODIFICATIONS: You MUST read the file first to preserve existing logic. "
-        "5. Writes are atomic; always write the FULL file content."
-        "6. MANDATORY VERIFICATION: After calling 'dev_write_file', you MUST immediately call 'dev_check_logs' to verify the execution result based on the 'LOG INTERPRETATION RULES' below."
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {
-                "plugin_name": {
-                    "type": "string",
-                    "description": "The name of the plugin directory (e.g., 'Auto_Fly').",
-                },
-                "file_path": {
-                    "type": "string",
-                    "description": "Relative file path (e.g., 'main.py').",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The FULL content of the file.",
-                },
-            },
-            "required": ["plugin_name", "file_path", "content"],
-        }
-    )
-
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        if not file_manager: return "Error: FileManager not initialized."
-
-        plugin_name = kwargs.get("plugin_name")
-        file_path = kwargs.get("file_path")
-        content = kwargs.get("content")
-
-        if not all([plugin_name, file_path, content]):
-            return "Error: Missing required parameters (plugin_name, file_path, or content)."
-
-        await _send_tip(context, f"📝 正在编写文件: {plugin_name}/{file_path} ...")
-
-        result = await file_manager.write_file(plugin_name, file_path, content)
-
-        return (
-            f"{result}\n"
-            f"[System Hint] File updated. AstrBot is detecting changes.\n"
-            f"--> Please call 'dev_check_logs' NOW to verify the reload status based on the 'LOG INTERPRETATION RULES' in the tool description."
+    async def initialize(self):
+        await asyncio.to_thread(
+            self.knowledge.import_seed,
+            Path(__file__).resolve().parents[1] / "knowledge/seed.sqlite3",
         )
+        # The broker is internal to AstrBot; keep a bounded fallback for portability.
+        from astrbot.core.log import LogManager as HostLogManager
 
+        broker = getattr(HostLogManager, "_log_broker", None)
+        self.logs = LogManager(self.config, broker)
 
-@dataclass
-class ReadFileTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_read_file"
-    description: str = (
-        "Read the content of an existing file. "
-        "MANDATORY STEP: Always use this tool FIRST when modifying code or analyzing bugs. "
-        "Combine the code content with the error logs from 'dev_check_logs' to diagnose issues accurately."
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "The plugin directory name."},
-                "file_path": {"type": "string", "description": "Relative file path."},
-            },
-            "required": ["plugin_name", "file_path"],
-        }
-    )
+    def allowed(self, event):
+        return not self.config.get("enable_whitelist", True) or str(
+            event.get_sender_id()
+        ) in {str(uid) for uid in self.config.get("whitelist_users", [])}
 
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        if not file_manager: return "Error: FileManager not initialized."
-        plugin_name = kwargs.get("plugin_name")
-        file_path = kwargs.get("file_path")
-        await _send_tip(context, f"📖 正在读取文件: {plugin_name}/{file_path} ...")
-        content = await file_manager.read_file(plugin_name, file_path)
-        return content
+    async def references(self, query, purpose):
+        rows = await asyncio.to_thread(self.knowledge.search, query, "", 6, purpose)
+        return [
+            {
+                "id": r["id"],
+                "key": r["key"],
+                "kind": r["kind"],
+                "category": r["category"],
+                "title": r["title"],
+                "source": r["source"],
+                "content": r["content"][:2000],
+            }
+            for r in rows
+        ]
 
-
-@dataclass
-class ListFilesTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_list_files"
-    description: str = (
-        "List all files in a specific plugin directory. "
-        "Use this if you need to check the file structure of a plugin directory."
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {
-                "plugin_name": {"type": "string", "description": "The plugin directory name."},
-            },
-            "required": ["plugin_name"],
-        }
-    )
-
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        if not file_manager: return "Error: FileManager not initialized."
-
-        plugin_name = kwargs.get("plugin_name") or kwargs.get("dir_path") or "."
-        if "/plugins/" in plugin_name:
-            plugin_name = plugin_name.split("/plugins/")[-1]
-        plugin_name = plugin_name.lstrip("/").lstrip(".")
-        if not plugin_name: plugin_name = "."
-
-        try:
-            result = await file_manager.list_files(plugin_name)
-            return result
-        except Exception as e:
-            return f"Error listing files: {str(e)}"
-
-
-@dataclass
-class LoadPluginTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_load_plugin"
-    description: str = (
-        "Automatically load all uninstalled plugins."
-        "WHEN TO USE:"
-        "1. After creating a new plugin."
-        "2. When the user asks to 'install', 'load', or 'activate' plugin(s)."
-        "3. After modifying a plugin, if logs only show '检测到文件变化' but not '正在重载/正在载入'."
-        "NO PARAMETERS NEEDED - just call it directly."
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-    )
-
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        ctx = context.context.context
-        event = context.context.event
-        star_manager: PluginManager = ctx._star_manager
-
-        if not star_manager:
-            return "Error: Could not access PluginManager."
-
-        base_path = TOOL_CONFIG.get("plugin_base_dir", "./data/plugins")
-
-        def _scan_plugin_dirs(path: str) -> set:
-            """同步扫描插件目录，在线程池中执行"""
-            dirs = set()
-            for item in os.listdir(path):
-                item_path = os.path.join(path, item)
-                if os.path.isdir(item_path):
-                    if os.path.exists(os.path.join(item_path, "main.py")) or \
-                       os.path.exists(os.path.join(item_path, "metadata.yaml")):
-                        dirs.add(item)
-            return dirs
-
-        try:
-            all_dirs_on_disk = await asyncio.to_thread(_scan_plugin_dirs, base_path)
-        except Exception as e:
-            return f"Error scanning plugin directory: {str(e)}"
-
-
-        loaded_plugins = ctx.get_all_stars()
-        loaded_dir_names = {p.root_dir_name for p in loaded_plugins} if loaded_plugins else set()
-
-        unloaded_dirs = all_dirs_on_disk - loaded_dir_names
-
-        if not unloaded_dirs:
-            return (
-                "All plugins already loaded. "
-                f"({len(loaded_dir_names)} plugins active)"
-            )
-
-        results = []
-        success_count = 0
-        fail_count = 0
-
-        for dir_name in sorted(unloaded_dirs):
+    async def execute(self, operation, event, args):
+        if self.closed:
+            return {"ok": False, "error": "Plugin runtime has been terminated"}
+        if not self.allowed(event):
+            return {"ok": False, "error": "当前用户不在开发工具白名单中"}
+        if self.config.get("verbose_steps", True) and operation in {
+            "dev_write_file",
+            "dev_write_files",
+            "dev_load_plugin",
+            "dev_rollback_plugin",
+        }:
             try:
-                success, error_msg = await star_manager.load(specified_dir_name=dir_name)
-                if success:
-                    results.append(f"✅ {dir_name}")
-                    success_count += 1
-                else:
-                    results.append(f"❌ {dir_name}: {error_msg}")
-                    fail_count += 1
-            except Exception as e:
-                results.append(f"❌ {dir_name}: {str(e)}")
-                fail_count += 1
+                from astrbot.api.event import MessageChain
 
-        try:
-            if success_count > 0:
-                msg = f"✅ 已加载 {success_count} 个新插件" + (f"，{fail_count} 个失败" if fail_count else "")
-                chain = MessageChain().message(msg)
-                await ctx.send_message(event.unified_msg_origin, chain)
-        except Exception:
-            pass
+                await self.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain().message(
+                        f"开发操作：{operation} · {args.get('plugin_name', '')}"
+                    ),
+                )
+            except Exception:
+                logging.getLogger("astrbot").debug(
+                    "Developer progress notification unavailable", exc_info=True
+                )
+        async with self.lock:
+            try:
+                return await self._execute(operation, args)
+            except Exception as exc:
+                try:
+                    entry = await asyncio.to_thread(
+                        self.knowledge.record_failure,
+                        operation,
+                        str(args.get("plugin_name", "")),
+                        exc,
+                    )
+                except Exception:
+                    logging.getLogger("astrbot").exception(
+                        "Failed to persist developer tool failure"
+                    )
+                    entry = None
+                return {"ok": False, "error": str(exc), "experience_id": entry}
 
-        return f"Loaded {success_count}, Failed {fail_count}. Details:\n" + "\n".join(results)
+    async def _execute(self, operation, args):
+        plugin = args.get("plugin_name", "")
+        if operation == "dev_search_knowledge":
+            result = {
+                "ok": True,
+                "entries": await asyncio.to_thread(
+                    self.knowledge.search,
+                    args.get("query", ""),
+                    args.get("category", ""),
+                    args.get("limit", 6),
+                    "explicit development lookup",
+                ),
+            }
+            for entry in result["entries"]:
+                entry["total_characters"] = len(entry["content"])
+                entry["content"] = entry["content"][:3000]
+            return result
+        if operation == "dev_read_knowledge":
+            return {
+                "ok": True,
+                "entry": await asyncio.to_thread(
+                    self.knowledge.read, args["entry_id"], args.get("offset", 0)
+                ),
+            }
+        if operation == "dev_save_knowledge":
+            entry = await asyncio.to_thread(
+                self.knowledge.save,
+                args["key"],
+                args["category"],
+                args["title"],
+                args["content"],
+                args["source"],
+                args.get("kind", "reference"),
+            )
+            return {"ok": True, "entry_id": entry}
+        if operation == "dev_knowledge_categories":
+            if args.get("old") or args.get("new"):
+                await asyncio.to_thread(
+                    self.knowledge.rename_category, args.get("old"), args.get("new")
+                )
+            return {
+                "ok": True,
+                "categories": await asyncio.to_thread(self.knowledge.categories),
+            }
+        if operation == "dev_read_file":
+            result = await self.files.read_file(
+                plugin, args["file_path"], args.get("start", 1), args.get("lines", 200)
+            )
+            result["references"] = await self.references(
+                f"{args['file_path']} {args.get('topic', '')}", "before editing"
+            )
+            return {"ok": True, **result}
+        if operation == "dev_list_files":
+            names = await asyncio.to_thread(self.files.files, plugin)
+            offset = max(0, int(args.get("offset", 0)))
+            return {
+                "ok": True,
+                "files": names[offset : offset + 200],
+                "total": len(names),
+            }
+        if operation in {"dev_write_file", "dev_write_files"}:
+            changes = args["changes"] if operation == "dev_write_files" else [args]
+            refs = await self.references(
+                args["topic"] + " " + " ".join(c["file_path"] for c in changes),
+                "write validation",
+            )
+            result = await asyncio.to_thread(self.files.apply, plugin, changes)
+            return {
+                **result,
+                "references": refs,
+                "operation_time": time.time(),
+                "next": "Call dev_load_plugin for explicit load/reload status; test the changed behavior.",
+            }
+        if operation == "dev_backup_plugin":
+            return {
+                "ok": True,
+                "backup_id": await asyncio.to_thread(
+                    self.files.snapshot, plugin, args.get("reason", "manual")
+                ),
+            }
+        if operation == "dev_list_backups":
+            return {
+                "ok": True,
+                "backups": await asyncio.to_thread(self.files.history, plugin),
+            }
+        if operation == "dev_rollback_plugin":
+            return await asyncio.to_thread(
+                self.files.rollback, plugin, args["backup_id"]
+            )
+        if operation == "dev_check_logs":
+            return {
+                "ok": True,
+                "logs": self.logs.get_logs(
+                    args.get("lines", self.config.get("log_lines_default", 100)),
+                    plugin,
+                    args.get("since", 0),
+                ),
+                "note": "No logs does not prove success or failure. Use load results and behavior tests.",
+            }
+        if operation == "dev_list_plugins":
+            return {
+                "ok": True,
+                "plugins": [
+                    {
+                        "name": p.name,
+                        "directory": p.root_dir_name,
+                        "active": p.activated,
+                    }
+                    for p in self.context.get_all_stars()
+                ],
+            }
+        manager = self.context._star_manager
+        if operation == "dev_load_plugin":
+            root = self.files.path(plugin)
+            if Path(manager.plugin_store_path).resolve() != self.files.base_path:
+                raise ValueError(
+                    "Configured plugin directory differs from the host plugin store"
+                )
+            if not ((root / "main.py").is_file() or (root / f"{plugin}.py").is_file()):
+                raise ValueError("No supported plugin entry point")
+            metadata = next(
+                (p for p in self.context.get_all_stars() if p.root_dir_name == plugin),
+                None,
+            )
+            if metadata and not metadata.activated:
+                raise ValueError(
+                    "Plugin is disabled; enable it in AstrBot before reloading"
+                )
+            if metadata:
+                success, error = await manager.reload(metadata.name)
+            elif plugin in manager.failed_plugin_dict:
+                success, error = await manager.reload_failed_plugin(plugin)
+            else:
+                async with manager._pm_lock:
+                    success, error = await manager.load(specified_dir_name=plugin)
+            result = {"ok": bool(success), "error": error, "behavior_tested": False}
+            if not success:
+                result["experience_id"] = await asyncio.to_thread(
+                    self.knowledge.record_failure,
+                    "plugin load",
+                    plugin,
+                    RuntimeError(str(error)),
+                )
+                if args.get("rollback_backup_id"):
+                    result["rollback"] = await asyncio.to_thread(
+                        self.files.rollback, plugin, args["rollback_backup_id"]
+                    )
+                    if plugin in manager.failed_plugin_dict:
+                        restored, restore_error = await manager.reload_failed_plugin(
+                            plugin
+                        )
+                    else:
+                        async with manager._pm_lock:
+                            restored, restore_error = await manager.load(
+                                specified_dir_name=plugin
+                            )
+                    result["restored_load"] = {"ok": restored, "error": restore_error}
+            return result
+        if operation == "dev_uninstall_plugin":
+            metadata = self.context.get_registered_star(plugin)
+            if not metadata or metadata.reserved:
+                raise ValueError("Plugin does not exist or is built in")
+            backup = await asyncio.to_thread(
+                self.files.snapshot, metadata.root_dir_name, "before uninstall"
+            )
+            await manager.uninstall_plugin(
+                plugin_name=plugin, delete_config=False, delete_data=False
+            )
+            return {
+                "ok": True,
+                "backup_id": backup,
+                "directory": metadata.root_dir_name,
+            }
+        raise ValueError("Unknown developer operation")
 
+    def shutdown(self):
+        self.closed = True
+        if self.logs:
+            self.logs.shutdown()
 
 
 @dataclass
-class CheckLogsTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_check_logs"
-    description: str = (
-        "Check recent system logs from memory. "
-        "INTERPRETATION RULES: "
-        "1. POST-EDIT SILENCE (IMPORTANT): If you just wrote or modified a command and see NO log record of it being run -> This is NORMAL. It means the user hasn't tested it yet. STOP tool usage immediately and wait for user confirmation/testing. "
-        "2. MISSING PREFIXES: If logs show a command without a prefix (e.g., 'hello' instead of '/hello') -> This is NORMAL (interception). Do NOT treat this as a bug unless the user explicitly complains. "
-        "3. COMMAND USAGE STANDARDS: "
-        "   - Basic: Simply use `@filter.command('name')`. Accept this as the correct foundation. "
-        "   - Advanced: For 带参指令, 指令组, or 指令别名, DO NOT GUESS. You MUST refer to the Developer Documentation to verify the correct syntax. "
-        "4. RELOAD STATUS: "
-        "   - 'File changed' + 'Loading/Reloading' = Success. "
-        "   - 'File changed' + Error = Fix it. "
-        "   - 'File changed' ONLY (no other msg) = Plugin not installed. Call 'dev_load_plugin'. "
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {
-                "lines": {
-                    "type": "integer",
-                    "description": "Number of lines to retrieve (default 100).",
-                },
+class DeveloperTool(FunctionTool[AstrAgentContext]):
+    runtime: object = Field(default=None, exclude=True)
+
+    async def call(self, context, **kwargs):
+        result = await self.runtime.execute(self.name, context.context.event, kwargs)
+        return json.dumps(result, ensure_ascii=False)
+
+
+def create_tools(runtime):
+    string = {"type": "string"}
+    integer = {"type": "integer"}
+    file_change = {
+        "type": "object",
+        "properties": {
+            "file_path": string,
+            "content": string,
+            "expected_sha256": string,
+        },
+        "required": ["file_path", "content"],
+    }
+    definitions = [
+        (
+            "dev_read_knowledge",
+            "Read a knowledge entry in 6000-character pages by ID from search results.",
+            {"entry_id": integer, "offset": integer},
+            ["entry_id"],
+        ),
+        (
+            "dev_read_file",
+            "Read code before editing; returns SHA256 and relevant references/lessons.",
+            {
+                "plugin_name": string,
+                "file_path": string,
+                "topic": string,
+                "start": integer,
+                "lines": integer,
             },
-            "required": [],
-        }
-    )
-
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        if not log_manager: return "Error: LogManager not initialized."
-        default_lines = TOOL_CONFIG.get("log_lines_default", 100)
-        lines = kwargs.get("lines")
-        if lines is None:
-            lines = default_lines
-
-        await _send_tip(context, f"🔍 正在检查最近 {lines} 行日志...")
-        logs = log_manager.get_logs(lines)
-        # 简单截断防止过长
-        if len(logs) > 4000:
-            logs = "...(truncated)...\n" + logs[-4000:]
-        return f"Recent Logs (In-Memory Intercept):\n{logs}"
-
-
-@dataclass
-class ListPluginsTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_list_plugins"
-    description: str = (
-        "List all installed and loaded plugins. "
-        "Use this tool to find the correct 'plugin_name' (for uninstallation) or 'plugin_dir_name' (for file modification). "
-        "If you are looking for a specific feature (e.g. sticker, weather), use this list to identify the responsible plugin."
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-    )
-
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        ctx = context.context.context
-        all_plugins = ctx.get_all_stars()
-
-        if not all_plugins:
-            return "No plugins found."
-
-        msg_lines = ["Current Loaded Plugins:"]
-        msg_lines.append(f"{'Plugin Name':<30} | {'Dir Name':<30} | {'Status'}")
-        msg_lines.append("-" * 80)
-
-        for plugin in all_plugins:
-            status = "Active" if plugin.activated else "Disabled"
-            msg_lines.append(f"{plugin.name:<30} | {plugin.root_dir_name:<30} | {status}")
-
-        return "\n".join(msg_lines)
-
-
-@dataclass
-class UninstallPluginTool(FunctionTool[AstrAgentContext]):
-    name: str = "dev_uninstall_plugin"
-    description: str = (
-        "Uninstall a plugin by its NAME. "
-        "IMPORTANT: You MUST provide the 'plugin_name' (from metadata.yaml), NOT the directory name. "
-        "Use 'dev_list_plugins' first if you are unsure about the name. "
-        "This keeps plugin config and data by default."
-    )
-    parameters: dict = Field(
-        default_factory=lambda: {
-            "type": "object",
-            "properties": {
-                "plugin_name": {
-                    "type": "string",
-                    "description": "The exact name of the plugin to uninstall (e.g., 'astrbot_plugin_random_emoji_images').",
-                },
+            ["plugin_name", "file_path"],
+        ),
+        (
+            "dev_list_files",
+            "List source files in one plugin, excluding repository and cache directories.",
+            {"plugin_name": string, "offset": integer},
+            ["plugin_name"],
+        ),
+        (
+            "dev_write_file",
+            "Validate, back up and atomically replace one full file. Read first and pass its SHA256. "
+            "Search knowledge BEFORE composing code; topic describes APIs being changed. Call dev_load_plugin afterwards.",
+            {"plugin_name": string, "topic": string, **file_change["properties"]},
+            ["plugin_name", "file_path", "content", "topic"],
+        ),
+        (
+            "dev_write_files",
+            "Validate all changes then back up once and replace files. Recover files on write failure. "
+            "Search references before composing. Hot reload may observe intermediate files; use explicit load verification.",
+            {
+                "plugin_name": string,
+                "topic": string,
+                "changes": {"type": "array", "items": file_change},
             },
-            "required": ["plugin_name"],
-        }
-    )
-
-    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> str:
-        if not _check_permission(context):
-            return PERMISSION_DENIED_MSG
-        plugin_name = kwargs.get("plugin_name")
-
-        if not plugin_name:
-            return "Error: Missing parameter 'plugin_name'."
-
-        ctx = context.context.context
-        star_manager: PluginManager = ctx._star_manager
-
-        if not star_manager:
-            return "Error: Could not access PluginManager."
-
-        try:
-            # 调用卸载，默认保留数据
-            await star_manager.uninstall_plugin(plugin_name=plugin_name, delete_config=False, delete_data=False)
-            return f"Plugin '{plugin_name}' uninstalled successfully."
-        except Exception as e:
-            return f"Failed to uninstall plugin '{plugin_name}': {str(e)}"
+            ["plugin_name", "topic", "changes"],
+        ),
+        (
+            "dev_load_plugin",
+            "Load or reload ONE directory; use returned status rather than guessing logs. "
+            "Optional rollback_backup_id restores code and retries load on failure. Behavior still needs testing.",
+            {"plugin_name": string, "rollback_backup_id": string},
+            ["plugin_name"],
+        ),
+        (
+            "dev_check_logs",
+            "Read unified host logs by plugin/time. Missing logs is inconclusive. "
+            "Record diagnosed errors and verified fixes using dev_save_knowledge with kind=experience.",
+            {"plugin_name": string, "lines": integer, "since": {"type": "number"}},
+            [],
+        ),
+        (
+            "dev_list_plugins",
+            "List plugin metadata names, directories and enabled status.",
+            {},
+            [],
+        ),
+        (
+            "dev_uninstall_plugin",
+            "Back up then uninstall by METADATA NAME, retaining configuration/data.",
+            {"plugin_name": string},
+            ["plugin_name"],
+        ),
+        (
+            "dev_backup_plugin",
+            "Create a full source/resource snapshot; excludes .git and caches.",
+            {"plugin_name": string, "reason": string},
+            ["plugin_name"],
+        ),
+        (
+            "dev_list_backups",
+            "List the last 50 snapshots for a plugin directory.",
+            {"plugin_name": string},
+            ["plugin_name"],
+        ),
+        (
+            "dev_rollback_plugin",
+            "Restore source/resources by backup ID, first backing up current files. "
+            "Files created after the snapshot are removed; data/config outside source are retained. Reload afterwards.",
+            {"plugin_name": string, "backup_id": string},
+            ["plugin_name", "backup_id"],
+        ),
+        (
+            "dev_search_knowledge",
+            "Search categorized development docs AND error lessons BEFORE writing relevant code. "
+            "Use precise API/task keywords; cite entry IDs in reasoning.",
+            {"query": string, "category": string, "limit": integer},
+            ["query"],
+        ),
+        (
+            "dev_save_knowledge",
+            "Add/correct documentation or summarize errors with evidence. "
+            "Use a stable key to revise entries; kind is reference or experience. "
+            "Include symptom, cause, fix, actual validation and version. Mark untested fixes as pending. "
+            "New category names create categories automatically.",
+            dict.fromkeys(
+                ("key", "category", "title", "content", "source", "kind"), string
+            ),
+            ["key", "category", "title", "content", "source"],
+        ),
+        (
+            "dev_knowledge_categories",
+            "List categories or rename/merge old into new while retaining revision history.",
+            {"old": string, "new": string},
+            [],
+        ),
+    ]
+    return [
+        DeveloperTool(
+            name=name,
+            description=description,
+            runtime=runtime,
+            parameters={
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        )
+        for name, description, properties, required in definitions
+    ]

@@ -23,10 +23,16 @@
         "default": 100,
         "hint": "工具 dev_check_logs 默认读取的日志行数。"
     },
+    "log_max_history": {
+        "description": "日志读取及备用缓冲容量",
+        "type": "int",
+        "default": 1000,
+        "hint": "范围1至10000；优先读取宿主LogBroker，其历史长度由宿主控制。单次最多返回500条。"
+    },
     "plugin_base_dir": {
         "description": "插件安装根目录",
         "type": "string",
-        "default": "./data/plugins",
-        "hint": "插件开发和读取的根路径，通常无需修改。"
+        "default": "",
+        "hint": "留空跟随宿主插件目录（支持ASTRBOT_ROOT）；自定义目录必须与宿主加载目录一致才能加载插件。"
     }
 }

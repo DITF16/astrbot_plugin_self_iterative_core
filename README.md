@@ -85,6 +85,53 @@
 
 ## 🛠️ 安装与使用 | Installation & Usage
 
+### v1.2.0 开发流程
+
+要求 AstrBot `>=4.29.1,<5`。先配置白名单用户 ID；默认空白名单不允许调用开发工具。
+
+1. 用 `dev_search_knowledge` 按本次需要的 API、配置或消息功能检索资料与错误经验；用 `dev_read_knowledge` 分页读取完整章节。开发请求也会通过 `on_llm_request` 自动检索相关内容。
+2. 用 `dev_read_file` 读取已有文件，保留返回的 `sha256`。写入现有文件时必须以 `expected_sha256` 提交，避免覆盖其他修改。
+3. 用 `dev_write_file` 或 `dev_write_files` 提交完整内容与 `topic`。先校验 Python/JSON/YAML，再自动创建插件快照、原子替换文件；写入失败恢复快照。空文件内容受支持。
+4. 用 `dev_load_plugin(plugin_name=目录名)` 显式加载或重载一个插件。可传 `rollback_backup_id`，加载失败后恢复该备份并再次加载。成功加载后仍需测试实际指令/消息行为。
+5. 用 `dev_check_logs` 按插件名和 `since` 时间筛选统一日志。没有日志不能证明成功或失败。发现错误或文档缺漏后，用 `dev_save_knowledge` 写入来源、适用版本和验证结果；同一 `key` 更新保留修订。
+
+工具异常会自动记入“错误经验/待验证”；诊断完成后，应更新该条目的原因、修复方式、测试结果和分类。未验证方案不能标为已解决。`kind=reference` 表示开发资料，`kind=experience` 表示错误经验。新分类随条目自动建立，`dev_knowledge_categories(old=旧名,new=新名)` 可重命名或合并分类。模型应在编写每一部分代码前检索相关资料，引用返回的条目 ID。
+
+### 备份与回滚
+
+- `dev_backup_plugin`：手动建立快照；修改和卸载前也会自动备份。
+- `dev_list_backups`：查询指定插件最近50条备份，返回备份 ID。
+- `dev_rollback_plugin`：恢复指定备份，回滚前自动保存当前状态，因此可用 `safety_backup` 撤销本次回滚；之后执行显式加载。
+- 快照包含插件源码与资源，不包含 `.git`、缓存、虚拟环境、`node_modules`；不会恢复源码目录之外的宿主配置或运行数据。回滚会移除快照之后新增的受管理文件。
+- 单个源码读写上限1 MiB，快照总文件内容上限32 MiB、5000文件；保留快照不自动清理。链接与目录联接被拒绝。
+
+运行数据保存在宿主 `data/plugin_data/astrbot_plugin_self_iterative_core/`：`backups.sqlite3` 保存快照，`knowledge.sqlite3` 保存可编辑知识、经验与修订。安装包中的 `knowledge/seed.sqlite3` 保存初始资料，升级导入不会覆盖已有同 key 的本地修订。
+
+如果修改后插件本身加载失败，停止 AstrBot 后可使用不依赖宿主导入的恢复命令。先列出备份，再添加 `--backup-id` 恢复：
+
+```powershell
+python scripts/rollback_plugin.py --plugin-root "D:/AstrBot/data/plugins" --data-dir "D:/AstrBot/data/plugin_data/astrbot_plugin_self_iterative_core" --plugin astrbot_plugin_example
+python scripts/rollback_plugin.py --plugin-root "D:/AstrBot/data/plugins" --data-dir "D:/AstrBot/data/plugin_data/astrbot_plugin_self_iterative_core" --plugin astrbot_plugin_example --backup-id 返回的备份ID
+```
+
+将示例路径替换为实际宿主路径，恢复后启动 AstrBot。自迭代核心自身也可按同样方式恢复。
+
+### 开发资料存储
+
+原 `astrbot_dev_knowledge/*.md` 已转换为 SQLite：按实际章节划分插件配置、事件与指令、消息格式、消息发送、LLM工具与Agent、会话历史、人格、存储、HTTP接口等分类。每个源文件的原始字节和 SHA256 存在 `sources` 表中，可完整导出；原 Markdown 在逐字节和数据库完整性校验通过后删除。代码块内的 `#` 不作为章节标题。
+
+`scripts/migrate_knowledge.py` 可迁移新增 Markdown 资料，`--delete-originals` 仅在数据库完整性和全部源文件字节校验通过后删除源文件。已有运行库中的分类和正文修订优先保留。
+
+### 验证与边界
+
+```powershell
+python -B -m unittest discover -s tests -v
+ruff check --no-cache main.py utils scripts tests
+ruff format --no-cache --check main.py utils scripts tests
+```
+
+多文件变更逐文件原子替换，文件系统监听仍可能观察到中间状态；应在提交完成后显式重载并检查最终状态。文件哈希防止工具读写之间的常见覆盖冲突，不能锁住外部编辑器或宿主监听器。首次建立开发流程时建议通过显式重载验证。
+
 1.  **安装插件**：
     *   通过 **AstrBot 插件市场** 直接安装。
     *   或 **下载压缩包** 解压，将 `astrbot_plugin_self_iterative_core` 文件夹放置于 `data/plugins/` 目录下。
