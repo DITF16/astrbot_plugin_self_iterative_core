@@ -85,7 +85,14 @@
 
 ## 🛠️ 安装与使用 | Installation & Usage
 
-### v1.3.1 开发流程
+### v1.4.0 开发流程
+
+模型提供商与知识库页面：
+
+- `model_provider_id` 使用 AstrBot 的 `_special: select_provider`，可选择已配置的文本模型提供商；留空时开发请求继续使用当前会话模型。提供商被删除或不可用时自动回退当前会话。
+- `web_admin_users` 用于限制知识库页面的 WebUI 用户名；留空时允许已登录 WebUI 用户。页面位于 `views/knowledge/index.html`，通过 AstrBotPluginView bridge 调用 `/knowledge/entries`、`/knowledge/entry` 和 `/knowledge/save`。
+- 页面支持搜索、分页、查看正文、修改正文和索引、归档条目。保存必须携带当前 `revision`，冲突时重新读取后再保存。
+
 
 要求 AstrBot `>=4.29.1,<5`。先配置白名单用户 ID；默认空白名单不允许调用开发工具。
 

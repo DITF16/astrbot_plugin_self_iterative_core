@@ -8,6 +8,32 @@ The builder only copies these decisions; it does not infer classifications.
 # API identifiers, related card keys. Source membership is deliberately explicit.
 CARDS = [
     (
+        "model-provider-config",
+        "插件配置/模型选择",
+        "选择已配置的模型提供商或跟随当前会话",
+        ["@supplement:model-provider-config"],
+        "使用配置 Schema 的 select_provider 让管理员选择 AstrBot 已配置的文本模型提供商；空字符串表示不覆盖当前会话模型。",
+        ["选择模型提供商", "开发模型", "当前会话模型", "select_provider"],
+        ["_special", "select_provider", "selected_provider", "get_provider_by_id"],
+        ["config-schema", "config-runtime", "plugin-pages"],
+    ),
+    (
+        "plugin-pages",
+        "插件页面/WebUI",
+        "使用 AstrBot WebUI 页面管理插件知识库",
+        ["@supplement:plugin-pages"],
+        "视图放在 views/<name>/index.html，通过 AstrBotPluginView bridge 调用 context.register_web_api 注册的后端接口；页面使用 WebUI 会话身份，后端分页读写并检查修订号。",
+        ["插件页面", "知识库页面", "WebUI 管理", "可视化视图"],
+        [
+            "views",
+            "AstrBotPluginView",
+            "register_web_api",
+            "request.username",
+            "json_response",
+        ],
+        ["config-schema", "development-workflow", "lesson-lifecycle"],
+    ),
+    (
         "plugin-start",
         "插件基础/结构与生命周期",
         "新建插件的最小结构与资源清理",

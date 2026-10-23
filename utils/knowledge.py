@@ -418,6 +418,37 @@ class KnowledgeStore:
                 )
             ]
 
+    def list_entries(self, query="", page=1, page_size=20, include_archived=False):
+        """Return bounded knowledge indexes for the administrator view."""
+        if not isinstance(query, str) or len(query) > 200:
+            raise ValueError("query must be at most 200 characters")
+        page = max(1, min(int(page), 1000000))
+        page_size = max(1, min(int(page_size), 100))
+        with self.connect() as db:
+            where = "(?='' OR e.key LIKE ? OR e.title LIKE ? OR e.category LIKE ?)"
+            state = (
+                "" if include_archived else " AND coalesce(p.status,'active')='active'"
+            )
+            pattern = f"%{query}%"
+            total = db.execute(
+                f"SELECT count(*) FROM entries e LEFT JOIN entry_profiles p USING(key) WHERE {where}{state}",
+                (query, pattern, pattern, pattern),
+            ).fetchone()[0]
+            rows = db.execute(
+                f"SELECT e.id,e.key,e.kind,e.category,e.title,e.revision,e.updated,"
+                f"coalesce(p.summary,'') summary,coalesce(p.status,'active') status,"
+                f"coalesce(p.verification,'documented') verification FROM entries e "
+                f"LEFT JOIN entry_profiles p USING(key) WHERE {where}{state} "
+                "ORDER BY e.updated DESC,e.id DESC LIMIT ? OFFSET ?",
+                (query, pattern, pattern, pattern, page_size, (page - 1) * page_size),
+            ).fetchall()
+            return {
+                "items": [dict(row) for row in rows],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+
     def read(self, entry_id, offset=0):
         with self.connect() as db:
             row = db.execute(

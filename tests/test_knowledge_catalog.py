@@ -22,9 +22,9 @@ class CatalogTests(unittest.TestCase):
             sources = db.execute("SELECT raw,sha256 FROM sources").fetchall()
             self.assertEqual(len(sources), 0)
             self.assertEqual(
-                db.execute("SELECT count(*) FROM entries").fetchone()[0], 46
+                db.execute("SELECT count(*) FROM entries").fetchone()[0], 48
             )
-        self.assertEqual(len(CARDS), 46)
+        self.assertEqual(len(CARDS), 48)
 
     def test_natural_language_and_api_retrieval(self):
         cases = {
@@ -202,3 +202,21 @@ class CatalogTests(unittest.TestCase):
             legacy.search("corrected example")[0]["content"],
             "intro corrected example end",
         )
+
+    def test_admin_listing_is_bounded_and_excludes_archived(self):
+        listing = self.store.list_entries("config", page=1, page_size=5)
+        self.assertLessEqual(len(listing["items"]), 5)
+        item = listing["items"][0]
+        self.store.save_with_profile(
+            {
+                "key": item["key"],
+                "expected_revision": item["revision"],
+                "status": "archived",
+            }
+        )
+        active = self.store.list_entries("config", page=1, page_size=100)["items"]
+        archived = self.store.list_entries(
+            "config", page=1, page_size=100, include_archived=True
+        )["items"]
+        self.assertNotIn(item["key"], [row["key"] for row in active])
+        self.assertIn(item["key"], [row["key"] for row in archived])
