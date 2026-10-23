@@ -36,10 +36,4 @@
         "default": 1000,
         "hint": "范围1至10000；优先读取宿主LogBroker，其历史长度由宿主控制。单次最多返回500条。"
     },
-    "plugin_base_dir": {
-        "description": "插件安装根目录",
-        "type": "string",
-        "default": "",
-        "hint": "留空跟随宿主插件目录（支持ASTRBOT_ROOT）；自定义目录必须与宿主加载目录一致才能加载插件。"
-    }
 }

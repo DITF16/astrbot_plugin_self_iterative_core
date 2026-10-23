@@ -1,5 +1,9 @@
 ### 📋 **更新日志 (Changelog)**
 
+### v1.4.3
+- 在 metadata.yaml 声明 knowledge WebUI 视图，兼容依赖元数据页面入口的 AstrBot WebUI 版本。
+- 移除无实际必要的 plugin_base_dir 配置，目标插件统一使用 AstrBot 当前插件目录。
+
 ### v1.4.2
 
 - 简化 README 后补充插件备份回滚、内置知识库、错误经验库、WebUI 知识管理和模型选择等核心功能特点。
@@ -59,4 +63,5 @@
 
 ### v1.0.1
 - 📝 完善工具使用规则
+
 

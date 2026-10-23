@@ -83,12 +83,7 @@ class PluginDeveloper(Star):
         super().__init__(context)
         self.config = config or {}
 
-        configured = self.config.get("plugin_base_dir", "")
-        base = (
-            configured
-            if configured and configured != "./data/plugins"
-            else get_astrbot_plugin_path()
-        )
+        base = get_astrbot_plugin_path()
         self.runtime = DeveloperRuntime(
             context,
             self.config,
