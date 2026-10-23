@@ -22,8 +22,8 @@ CARDS = [
         "插件页面/WebUI",
         "使用 AstrBot WebUI 页面管理插件知识库",
         ["@supplement:plugin-pages"],
-        "视图放在 views/<name>/index.html，通过 AstrBotPluginView bridge 调用 context.register_web_api 注册的后端接口；页面使用 WebUI 会话身份，后端分页读写并检查修订号。",
-        ["插件页面", "知识库页面", "WebUI 管理", "可视化视图"],
+        "页面放在 pages/<name>/index.html，通过 AstrBotPluginView bridge 调用 context.register_web_api 注册的后端接口；页面使用 WebUI 会话身份，后端分页读写并检查修订号。当前示例插件使用 pages 目录。",
+        ["插件页面", "知识库页面", "WebUI 管理", "可视化页面"],
         [
             "views",
             "AstrBotPluginView",
