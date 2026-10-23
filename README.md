@@ -85,11 +85,11 @@
 
 ## 🛠️ 安装与使用 | Installation & Usage
 
-### v1.2.0 开发流程
+### v1.3.0 开发流程
 
 要求 AstrBot `>=4.29.1,<5`。先配置白名单用户 ID；默认空白名单不允许调用开发工具。
 
-1. 用 `dev_search_knowledge` 按本次需要的 API、配置或消息功能检索资料与错误经验；用 `dev_read_knowledge` 分页读取完整章节。开发请求也会通过 `on_llm_request` 自动检索相关内容。
+1. 用 `dev_search_knowledge(topics=["配置项","llm_generate","主动发送"])` 分别检索各部分资料与错误经验，也可通过 `query` 单独查询。结果只给摘要和索引；用 `dev_read_knowledge` 按 ID 分页读完正文，按 `related` 的稳定 key 查询关联资料。开发请求自动注入的索引只是初始线索。
 2. 用 `dev_read_file` 读取已有文件，保留返回的 `sha256`。写入现有文件时必须以 `expected_sha256` 提交，避免覆盖其他修改。
 3. 用 `dev_write_file` 或 `dev_write_files` 提交完整内容与 `topic`。先校验 Python/JSON/YAML，再自动创建插件快照、原子替换文件；写入失败恢复快照。空文件内容受支持。
 4. 用 `dev_load_plugin(plugin_name=目录名)` 显式加载或重载一个插件。可传 `rollback_backup_id`，加载失败后恢复该备份并再次加载。成功加载后仍需测试实际指令/消息行为。
@@ -105,7 +105,7 @@
 - 快照包含插件源码与资源，不包含 `.git`、缓存、虚拟环境、`node_modules`；不会恢复源码目录之外的宿主配置或运行数据。回滚会移除快照之后新增的受管理文件。
 - 单个源码读写上限1 MiB，快照总文件内容上限32 MiB、5000文件；保留快照不自动清理。链接与目录联接被拒绝。
 
-运行数据保存在宿主 `data/plugin_data/astrbot_plugin_self_iterative_core/`：`backups.sqlite3` 保存快照，`knowledge.sqlite3` 保存可编辑知识、经验与修订。安装包中的 `knowledge/seed.sqlite3` 保存初始资料，升级导入不会覆盖已有同 key 的本地修订。
+运行数据保存在宿主 `data/plugin_data/astrbot_plugin_self_iterative_core/`：`backups.sqlite3` 保存快照，`knowledge.sqlite3` 保存可编辑知识、经验与修订。安装包中的 `knowledge/seed.sqlite3` 保存初始资料，升级更新未修改的打包条目，保留已有同 key 的本地修订与分类。
 
 如果修改后插件本身加载失败，停止 AstrBot 后可使用不依赖宿主导入的恢复命令。先列出备份，再添加 `--backup-id` 恢复：
 
@@ -120,14 +120,20 @@ python scripts/rollback_plugin.py --plugin-root "D:/AstrBot/data/plugins" --data
 
 原 `astrbot_dev_knowledge/*.md` 已转换为 SQLite：按实际章节划分插件配置、事件与指令、消息格式、消息发送、LLM工具与Agent、会话历史、人格、存储、HTTP接口等分类。每个源文件的原始字节和 SHA256 存在 `sources` 表中，可完整导出；原 Markdown 在逐字节和数据库完整性校验通过后删除。代码块内的 `#` 不作为章节标题。
 
+v1.3.0 通读 15 份源资料后，按编写任务手工组织为 46 个知识块：配置字段与运行时读取、消息对象与发送、LLM 调用与工具、历史与人格、会话等待、存储、渲染、平台适配、HTTP 接口、宿主配置及错误经验等。分类、原文成员、摘要、API 别名和关联关系显式保存在 `knowledge/catalog.py`；`scripts/build_catalog.py` 只将这些决定写入数据库并检查原 216 条资料的覆盖，不自动判断分类。相关示例和说明保存在同一块正文中，原章节归档可用 `include_archived=true` 查询；有误的存储示例标记了替代条目。
+
+`entry_profiles` 保存摘要、任务别名、API、关联条目、原文成员、状态和适用性，`profile_revisions` 保存索引修订。运行时用 `dev_save_knowledge` 补充 `summary`、`aliases`、`apis`、`related`、`applicability`、`verification` 等字段；`related` 使用已有条目的稳定 key。分类可以随实际开发新增或调整。验证状态区分原文资料 `documented`、源码核对 `source_checked`、实际测试 `tested`、错误观察 `observed`。重复出现同一错误不会覆盖已补充的诊断。
+
+检索采用关键词、手工别名及 API 匹配；多主题查询分别保留候选及关联索引，减少一个主题挤占全部结果的情况。它仍可能遗漏不同表述，应结合分类浏览、改写查询和宿主源码核对；资料覆盖检查只证明原条目有去向，不代表所有示例都已实测或覆盖所有未来需求。
+
 `scripts/migrate_knowledge.py` 可迁移新增 Markdown 资料，`--delete-originals` 仅在数据库完整性和全部源文件字节校验通过后删除源文件。已有运行库中的分类和正文修订优先保留。
 
 ### 验证与边界
 
 ```powershell
 python -B -m unittest discover -s tests -v
-ruff check --no-cache main.py utils scripts tests
-ruff format --no-cache --check main.py utils scripts tests
+ruff check --no-cache main.py utils scripts tests knowledge/catalog.py
+ruff format --no-cache --check main.py utils scripts tests knowledge/catalog.py
 ```
 
 多文件变更逐文件原子替换，文件系统监听仍可能观察到中间状态；应在提交完成后显式重载并检查最终状态。文件哈希防止工具读写之间的常见覆盖冲突，不能锁住外部编辑器或宿主监听器。首次建立开发流程时建议通过显式重载验证。

@@ -54,7 +54,10 @@ class DeveloperRuntime:
                 "category": r["category"],
                 "title": r["title"],
                 "source": r["source"],
-                "content": r["content"][:2000],
+                "applicability": r["applicability"],
+                "summary": r.get("summary", ""),
+                "related": r.get("related", []),
+                "verification": r.get("verification", "documented"),
             }
             for r in rows
         ]
@@ -104,6 +107,13 @@ class DeveloperRuntime:
     async def _execute(self, operation, args):
         plugin = args.get("plugin_name", "")
         if operation == "dev_search_knowledge":
+            if args.get("topics"):
+                return {
+                    "ok": True,
+                    "plan": await asyncio.to_thread(
+                        self.knowledge.plan, args["topics"]
+                    ),
+                }
             result = {
                 "ok": True,
                 "entries": await asyncio.to_thread(
@@ -112,11 +122,15 @@ class DeveloperRuntime:
                     args.get("category", ""),
                     args.get("limit", 6),
                     "explicit development lookup",
+                    args.get("include_archived", False),
                 ),
             }
             for entry in result["entries"]:
                 entry["total_characters"] = len(entry["content"])
-                entry["content"] = entry["content"][:3000]
+                entry.pop("content")
+            result["next"] = (
+                "Read relevant entry IDs with dev_read_knowledge; follow related keys as needed."
+            )
             return result
         if operation == "dev_read_knowledge":
             return {
@@ -126,15 +140,7 @@ class DeveloperRuntime:
                 ),
             }
         if operation == "dev_save_knowledge":
-            entry = await asyncio.to_thread(
-                self.knowledge.save,
-                args["key"],
-                args["category"],
-                args["title"],
-                args["content"],
-                args["source"],
-                args.get("kind", "reference"),
-            )
+            entry = await asyncio.to_thread(self.knowledge.save_with_profile, args)
             return {"ok": True, "entry_id": entry}
         if operation == "dev_knowledge_categories":
             if args.get("old") or args.get("new"):
@@ -394,9 +400,21 @@ def create_tools(runtime):
         (
             "dev_search_knowledge",
             "Search categorized development docs AND error lessons BEFORE writing relevant code. "
-            "Use precise API/task keywords; cite entry IDs in reasoning.",
-            {"query": string, "category": string, "limit": integer},
-            ["query"],
+            "Pass topics for independent development facets, or query for one lookup. "
+            "Returns indexes; read relevant IDs fully and follow related entries.",
+            {
+                "query": string,
+                "category": string,
+                "limit": integer,
+                "topics": {
+                    "type": "array",
+                    "items": string,
+                    "minItems": 1,
+                    "maxItems": 8,
+                },
+                "include_archived": {"type": "boolean"},
+            },
+            [],
         ),
         (
             "dev_save_knowledge",
@@ -404,9 +422,34 @@ def create_tools(runtime):
             "Use a stable key to revise entries; kind is reference or experience. "
             "Include symptom, cause, fix, actual validation and version. Mark untested fixes as pending. "
             "New category names create categories automatically.",
-            dict.fromkeys(
-                ("key", "category", "title", "content", "source", "kind"), string
-            ),
+            {
+                **dict.fromkeys(
+                    (
+                        "key",
+                        "category",
+                        "title",
+                        "content",
+                        "source",
+                        "kind",
+                        "summary",
+                        "replacement",
+                        "applicability",
+                    ),
+                    string,
+                ),
+                **{
+                    field: {"type": "array", "items": string}
+                    for field in ("aliases", "apis", "related")
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["active", "archived", "superseded"],
+                },
+                "verification": {
+                    "type": "string",
+                    "enum": ["documented", "source_checked", "tested", "observed"],
+                },
+            },
             ["key", "category", "title", "content", "source"],
         ),
         (

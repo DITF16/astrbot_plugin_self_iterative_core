@@ -49,7 +49,11 @@ class PluginDeveloper(Star):
         categories = await asyncio.to_thread(self.runtime.knowledge.categories)
         req.system_prompt += (
             "\n[Plugin development workflow] Search dev_search_knowledge before composing each part "
-            "of code; read existing files and preserve their SHA256. Use dev_write_files for related changes. "
+            "of code. Split the task into explicit topics (configuration, LLM, message sending, etc.) "
+            "and pass topics to search. Read relevant IDs through all pages with dev_read_knowledge; "
+            "follow related keys via search. Initial indexes are partial hints, not complete coverage. "
+            "If evidence is missing, check host sources and record the gap. "
+            "Read existing files and preserve their SHA256. Use dev_write_files for related changes. "
             "Keep metadata version and CHANGELOG updated for each release. Verify explicit load status and "
             "test behavior; save discovered documentation gaps and error lessons with evidence using "
             "dev_save_knowledge. Unverified runtime errors are observations, not proven fixes. "
@@ -58,7 +62,8 @@ class PluginDeveloper(Star):
             + ", ".join(c["category"] for c in categories)
             + "\n"
             + "\n".join(
-                f"[KB:{r['id']}] {r['title']} ({r['source']}):\n{r['content']}"
+                f"[KB:{r['id']}] {r['key']} {r['title']}: {r['summary']} "
+                f"Applicable: {r['applicability']}; verification: {r['verification']}; related: {r['related']}"
                 for r in refs
             )
         )
