@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import shutil
 import time
 from pathlib import Path
 
@@ -23,16 +24,21 @@ class DeveloperRuntime:
         self.config = config
         self.data_path = Path(data_path)
         self.files = FileManager(plugin_path, data_path)
-        self.knowledge = KnowledgeStore(self.data_path / "knowledge.sqlite3")
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        self.knowledge_path = self.data_path / "knowledge.sqlite3"
+        self._knowledge_existed = self.knowledge_path.is_file()
+        self.knowledge = KnowledgeStore(self.knowledge_path)
         self.lock = asyncio.Lock()
         self.logs = None
         self.closed = False
 
     async def initialize(self):
-        await asyncio.to_thread(
-            self.knowledge.import_seed,
-            Path(__file__).resolve().parents[1] / "knowledge/seed.sqlite3",
-        )
+        seed = Path(__file__).resolve().parents[1] / "knowledge/seed.sqlite3"
+        if not self._knowledge_existed:
+            await asyncio.to_thread(shutil.copy2, seed, self.knowledge_path)
+            self.knowledge = KnowledgeStore(self.knowledge_path)
+        else:
+            await asyncio.to_thread(self.knowledge.import_seed, seed)
         # The broker is internal to AstrBot; keep a bounded fallback for portability.
         from astrbot.core.log import LogManager as HostLogManager
 

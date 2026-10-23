@@ -17,7 +17,6 @@ from .utils.tools import DeveloperRuntime, create_tools
 class KnowledgeWeb:
     def __init__(self, runtime, config):
         self.runtime = runtime
-        self.config = config
         self.context = None
         self.routes = []
 
@@ -44,16 +43,7 @@ class KnowledgeWeb:
             ]
         self.routes.clear()
 
-    def _allowed(self):
-        username = getattr(request, "username", None)
-        allowed = {str(value) for value in self.config.get("web_admin_users", [])}
-        return bool(username) and (not allowed or str(username) in allowed)
-
     async def entries(self):
-        if not self._allowed():
-            return error_response(
-                "需要登录的 AstrBot WebUI 管理员权限", status_code=403
-            )
         page = request.query.get("page", 1, type=int)
         query = str(request.query.get("q", ""))[:200]
         try:
@@ -66,10 +56,6 @@ class KnowledgeWeb:
             return error_response(str(exc))
 
     async def entry(self):
-        if not self._allowed():
-            return error_response(
-                "需要登录的 AstrBot WebUI 管理员权限", status_code=403
-            )
         try:
             entry_id = request.query.get("id", type=int)
             return json_response(
@@ -79,10 +65,6 @@ class KnowledgeWeb:
             return error_response(str(exc))
 
     async def save(self):
-        if not self._allowed():
-            return error_response(
-                "需要登录的 AstrBot WebUI 管理员权限", status_code=403
-            )
         payload = await request.json(default={})
         if not isinstance(payload, dict) or not isinstance(payload.get("key"), str):
             return error_response("知识条目保存请求格式不合法")

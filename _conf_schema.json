@@ -18,12 +18,6 @@
         "_special": "select_provider",
         "hint": "选择用于编写和修改插件代码的 AstrBot 模型提供商；留空使用当前会话模型。"
     },
-    "web_admin_users": {
-        "description": "知识库页面管理员",
-        "type": "list",
-        "default": [],
-        "hint": "留空允许已登录 AstrBot WebUI 用户访问；填写 WebUI 用户名后仅允许这些用户。"
-    },
     "verbose_steps": {
         "description": "显示步骤提示",
         "type": "bool",

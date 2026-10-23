@@ -58,39 +58,18 @@
 
 ---
 
-## 🧠 模型建议 | Model Recommendations
+## 🧠 模型选择
 
-本插件的核心在于“迭代”与“推理”，这对大模型的逻辑思维能力提出了极高要求。
-
-*   **推荐模型**：`gemini-3-pro`
-    *   *作者强力推荐。只有具备顶尖推理能力的模型才能发挥本插件的完整功能，体验 BOT 自我升级的快感。*
-*   **不推荐**：
-    *   参数量较小或逻辑推理能力较弱的模型（“笨笨的大模型”）。
-    *   使用此类模型可能导致插件陷入死循环、生成无效代码或完全无法工作。
-
----
-
-## 📚 最佳实践 | Best Practices
-
-为了极大提升代码生成的成功率并减少幻觉，强烈建议配合以下工具使用：
-
-1.  **知识库增强 (RAG)**：
-    *   建议为 Bot 添加 **AstrBot 开发知识库**。
-    *   *原因*：LLM 默认并不清楚 AstrBot 最新的 API 变动。有了知识库，它能写出更准确、符合规范的代码。
-2.  **联网能力 (Web Search)**：
-    *   建议安装并开启网页搜索工具 **`astrbot-web-searcher`**。
-    *   *原因*：当 LLM 遇到报错或需要使用未知的 Python 库时，它可以自主上网搜索解决方案和文档，实现自我修复。
-
----
+插件编写质量取决于所选模型的代码理解、推理和调试能力；可在配置中选择 AstrBot 已配置的模型提供商，留空跟随当前会话。
 
 ## 🛠️ 安装与使用 | Installation & Usage
 
-### v1.4.0 开发流程
+### 开发流程
 
 模型提供商与知识库页面：
 
 - `model_provider_id` 使用 AstrBot 的 `_special: select_provider`，可选择已配置的文本模型提供商；留空时开发请求继续使用当前会话模型。提供商被删除或不可用时自动回退当前会话。
-- `web_admin_users` 用于限制知识库页面的 WebUI 用户名；留空时允许已登录 WebUI 用户。页面位于 `views/knowledge/index.html`，通过 AstrBotPluginView bridge 调用 `/knowledge/entries`、`/knowledge/entry` 和 `/knowledge/save`。
+- 知识库页面由 AstrBot WebUI 管理员入口控制，无需插件额外配置用户名。页面位于 `views/knowledge/index.html`，通过 AstrBotPluginView bridge 调用 `/knowledge/entries`、`/knowledge/entry` 和 `/knowledge/save`。
 - 页面支持搜索、分页、查看正文、修改正文和索引、归档条目。保存必须携带当前 `revision`，冲突时重新读取后再保存。
 
 
@@ -149,7 +128,7 @@ ruff format --no-cache --check main.py utils scripts tests knowledge/catalog.py
     *   通过 **AstrBot 插件市场** 直接安装。
     *   或 **下载压缩包** 解压，将 `astrbot_plugin_self_iterative_core` 文件夹放置于 `data/plugins/` 目录下。
 2.  **模型检查**：
-    *   确保你当前会话正在使用高智商 LLM (如 `gemini-3-pro`)。
+    *   选择适合代码理解和调试的模型；模型能力会影响插件编写质量。
 
 > [!TIP]
 > **如何让修改实时生效？**
@@ -171,3 +150,4 @@ ruff format --no-cache --check main.py utils scripts tests knowledge/catalog.py
 <div align="center">
     <sub>Designed for AstrBot. Designed by DITF16.</sub>
 </div>
+
