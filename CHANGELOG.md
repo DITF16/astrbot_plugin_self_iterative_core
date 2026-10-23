@@ -1,13 +1,14 @@
 ### 📋 **更新日志 (Changelog)**
 
+### v1.4.2
+
+- 简化 README 后补充插件备份回滚、内置知识库、错误经验库、WebUI 知识管理和模型选择等核心功能特点。
+
 ### v1.4.1
 
 - 首次加载时先将安装包 `knowledge/seed.sqlite3` 复制到 `data/plugin_data/astrbot_plugin_self_iterative_core/knowledge.sqlite3`，已有运行库才执行升级导入。
 - 清理 README 中过时的具体模型名称、外部 AstrBot 开发知识库建议和 v1.4.0 流程标题，改为说明模型能力对编写质量的影响。
 - 更新页面开发知识的权限说明。
-
-### v1.4.2
-- 简化 README 后补充插件备份回滚、内置知识库、错误经验库、WebUI 知识管理和模型选择等核心功能特点。
 
 ### v1.4.0
 - 新增 model_provider_id 配置项，使用 AstrBot 的 select_provider 选择已配置的文本模型；留空时跟随当前会话，提供商失效时回退当前会话。
