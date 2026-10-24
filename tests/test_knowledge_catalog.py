@@ -220,3 +220,12 @@ class CatalogTests(unittest.TestCase):
         )["items"]
         self.assertNotIn(item["key"], [row["key"] for row in active])
         self.assertIn(item["key"], [row["key"] for row in archived])
+
+    def test_knowledge_page_initializes_bridge_sdk_before_api_calls(self):
+        page = Path(__file__).resolve().parents[1] / "pages/knowledge/index.html"
+        content = page.read_text(encoding="utf-8")
+        self.assertLess(content.index("bridge-sdk.js"), content.index("apiGet"))
+        self.assertIn("await bridge.ready()", content)
+        self.assertIn(
+            "bridge=window.AstrBotPluginView||window.AstrBotPluginPage", content
+        )

@@ -1,3 +1,7 @@
+### v1.4.5
+- 修复知识库页面未加载 AstrBot bridge SDK 导致 piGet 未定义的问题；页面现在显式加载 bridge SDK 并等待 ridge.ready() 后再读取数据。
+- 增加页面初始化回归测试。
+
 ### v1.4.4
 - 修正知识库管理页面目录为 pages/knowledge/index.html，与 lottery_game 示例插件及当前页面发现规则一致。
 - 将页面目录规则写回知识库，避免后续开发再次使用无法识别的 iews 路径。
