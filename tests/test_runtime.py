@@ -58,7 +58,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_tool_schemas_construct_and_dispatch(self):
         registered = tools.create_tools(self.runtime)
-        self.assertEqual(len({t.name for t in registered}), 15)
+        self.assertEqual(len({t.name for t in registered}), 16)
         context = types.SimpleNamespace(context=types.SimpleNamespace(event=self.event))
         result = await next(t for t in registered if t.name == "dev_list_plugins").call(
             context
@@ -126,6 +126,25 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(loaded["ok"])
         self.assertTrue(loaded["restored_load"]["ok"])
         self.assertEqual((self.root / "plugins/demo/main.py").read_text(), "x = 1")
+
+    async def test_live_plugin_behavior_test_uses_registered_instance(self):
+        live = types.SimpleNamespace(
+            root_dir_name="demo",
+            activated=True,
+            star_cls=object(),
+            star_handler_full_names=["demo.main.command"],
+        )
+        self.context.get_all_stars = lambda: [live]
+        result = await self.runtime.execute("dev_test_plugin", self.event, {"plugin_name": "demo"})
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["behavior_tested"])
+        self.assertEqual(result["handler_count"], 1)
+
+    async def test_live_plugin_behavior_test_requires_loaded_instance(self):
+        result = await self.runtime.execute("dev_test_plugin", self.event, {"plugin_name": "demo"})
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["behavior_tested"])
+        self.assertEqual(result["status"], "not_loaded")
 
     async def test_shutdown_rejects_stale_tools(self):
         self.runtime.shutdown()

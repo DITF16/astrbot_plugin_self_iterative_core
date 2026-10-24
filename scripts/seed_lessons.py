@@ -88,6 +88,16 @@ def seed(path):
             "self_iterative_core 1.2.0: utils/knowledge.py; utils/tools.py",
             "reference",
         ),
+        (
+            "live-plugin-behavior-test",
+            "错误经验/插件测试",
+            "不要直接导入插件源码进行行为测试",
+            "症状：使用 importlib 直接加载插件 main.py 时出现 No module named 'astrbot'，或类对象与宿主加载状态不一致。原因：直接导入绕过了 AstrBot 的插件管理器、模块路径和实例生命周期。"
+            "修复：先调用 dev_load_plugin，再通过 dev_test_plugin 检查 AstrBot 已注册的活动实例和 Handler；需要端到端验证时再发送真实测试事件。"
+            "验证：dev_test_plugin 返回 loaded_and_registered、behavior_tested=true，并报告实时实例类名和 Handler 数量；未加载时明确返回 not_loaded。",
+            "self_iterative_core 1.4.6: utils/tools.py:dev_load_plugin/dev_test_plugin; AstrBot core.star.star_manager",
+            "experience",
+        ),
     ]
     for key, category, title, content, source, kind in entries:
         store.save(f"supplement:{key}", category, title, content, source, kind)

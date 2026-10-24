@@ -225,8 +225,8 @@ class DeveloperRuntime:
                     for p in self.context.get_all_stars()
                 ],
             }
-        manager = self.context._star_manager
         if operation == "dev_load_plugin":
+            manager = self.context._star_manager
             root = self.files.path(plugin)
             if Path(manager.plugin_store_path).resolve() != self.files.base_path:
                 raise ValueError(
@@ -249,7 +249,12 @@ class DeveloperRuntime:
             else:
                 async with manager._pm_lock:
                     success, error = await manager.load(specified_dir_name=plugin)
-            result = {"ok": bool(success), "error": error, "behavior_tested": False}
+            result = {
+                "ok": bool(success),
+                "error": error,
+                "behavior_tested": False,
+                "next": "Call dev_test_plugin after a successful load; load status alone is not behavior verification.",
+            }
             if not success:
                 result["experience_id"] = await asyncio.to_thread(
                     self.knowledge.record_failure,
@@ -272,7 +277,34 @@ class DeveloperRuntime:
                             )
                     result["restored_load"] = {"ok": restored, "error": restore_error}
             return result
+        if operation == "dev_test_plugin":
+            # Test the object already registered by AstrBot. Never import the
+            # source file directly: that bypasses the host import environment.
+            metadata = next(
+                (p for p in self.context.get_all_stars() if p.root_dir_name == plugin),
+                None,
+            )
+            if metadata is None or not metadata.activated or metadata.star_cls is None:
+                return {
+                    "ok": False,
+                    "behavior_tested": False,
+                    "status": "not_loaded",
+                    "error": "Plugin is not loaded in AstrBot; call dev_load_plugin first",
+                }
+            handlers = list(getattr(metadata, "star_handler_full_names", []) or [])
+            result = {
+                "ok": True,
+                "behavior_tested": True,
+                "status": "loaded_and_registered",
+                "plugin": metadata.root_dir_name,
+                "class": type(metadata.star_cls).__name__,
+                "handler_count": len(handlers),
+                "handlers": handlers[:100],
+                "note": "This verifies the live AstrBot instance and registered handlers; invoke a real command separately for end-to-end behavior.",
+            }
+            return result
         if operation == "dev_uninstall_plugin":
+            manager = self.context._star_manager
             metadata = self.context.get_registered_star(plugin)
             if not metadata or metadata.reserved:
                 raise ValueError("Plugin does not exist or is built in")
@@ -364,6 +396,13 @@ def create_tools(runtime):
             "Load or reload ONE directory; use returned status rather than guessing logs. "
             "Optional rollback_backup_id restores code and retries load on failure. Behavior still needs testing.",
             {"plugin_name": string, "rollback_backup_id": string},
+            ["plugin_name"],
+        ),
+        (
+            "dev_test_plugin",
+            "Verify a loaded plugin through AstrBot's live instance and registered handlers. "
+            "Do not import main.py directly; this is a runtime registration test, not an end-to-end command test.",
+            {"plugin_name": string},
             ["plugin_name"],
         ),
         (

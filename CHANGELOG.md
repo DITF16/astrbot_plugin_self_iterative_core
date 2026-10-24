@@ -1,3 +1,11 @@
+### 📋 **更新日志 (Changelog)**
+
+### v1.4.6
+
+- 新增 `dev_test_plugin`，复用 AstrBot 已加载的实时插件实例和 Handler，避免直接导入 `main.py` 导致运行环境缺少 `astrbot`。
+- `dev_load_plugin` 返回明确的下一步测试提示；行为测试状态区分未加载、已加载并注册。
+- 将运行日志中的直接导入失败补充到错误经验库。
+
 ### v1.4.5
 - 修复知识库页面未加载 AstrBot bridge SDK 导致 piGet 未定义的问题；页面现在显式加载 bridge SDK 并等待 ridge.ready() 后再读取数据。
 - 增加页面初始化回归测试。
@@ -5,8 +13,6 @@
 ### v1.4.4
 - 修正知识库管理页面目录为 pages/knowledge/index.html，与 lottery_game 示例插件及当前页面发现规则一致。
 - 将页面目录规则写回知识库，避免后续开发再次使用无法识别的 iews 路径。
-
-### 📋 **更新日志 (Changelog)**
 
 ### v1.4.3
 - 在 metadata.yaml 声明 knowledge WebUI 视图，兼容依赖元数据页面入口的 AstrBot WebUI 版本。
