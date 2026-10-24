@@ -32,11 +32,16 @@ modules = {
         "astrbot.core.agent.tool",
         "astrbot.core.astr_agent_context",
         "astrbot.core.log",
+        "astrbot.api",
     )
 }
 modules["astrbot.core.agent.tool"].FunctionTool = FunctionTool
 modules["astrbot.core.astr_agent_context"].AstrAgentContext = object
 modules["astrbot.core.log"].LogManager = types.SimpleNamespace(_log_broker=None)
+modules["astrbot.api"].logger = types.SimpleNamespace(
+    debug=lambda *args, **kwargs: None,
+    exception=lambda *args, **kwargs: None,
+)
 with patch.dict(sys.modules, modules):
     tools = importlib.import_module("utils.tools")
 

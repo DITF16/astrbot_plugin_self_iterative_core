@@ -13,7 +13,7 @@ tags:
 pages:
   - name: knowledge
     title: 知识库管理
-version: 2.0.2
+version: 2.0.3
 astrbot_version: ">=4.26.0"
 support_platforms:
   - aiocqhttp

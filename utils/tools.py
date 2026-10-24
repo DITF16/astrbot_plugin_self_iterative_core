@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import logging
 import shutil
 import time
 from pathlib import Path
@@ -12,6 +11,7 @@ from pydantic.dataclasses import dataclass
 
 from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_context import AstrAgentContext
+from astrbot.api import logger
 
 from .file_manager import FileManager
 from .knowledge import KnowledgeStore
@@ -144,7 +144,7 @@ class DeveloperRuntime:
                     ),
                 )
             except Exception:
-                logging.getLogger("astrbot").debug(
+                logger.debug(
                     "Developer progress notification unavailable", exc_info=True
                 )
         async with self.lock:
@@ -164,7 +164,7 @@ class DeveloperRuntime:
                             MessageChain().message(f"开发步骤完成：{operation}"),
                         )
                     except Exception:
-                        logging.getLogger("astrbot").debug(
+                        logger.debug(
                             "Developer completion notification unavailable", exc_info=True
                         )
                 return result
@@ -178,7 +178,7 @@ class DeveloperRuntime:
                             MessageChain().message(f"开发步骤失败：{operation} · {exc}"),
                         )
                     except Exception:
-                        logging.getLogger("astrbot").debug(
+                        logger.debug(
                             "Developer failure notification unavailable", exc_info=True
                         )
                 try:
@@ -189,7 +189,7 @@ class DeveloperRuntime:
                         exc,
                     )
                 except Exception:
-                    logging.getLogger("astrbot").exception(
+                    logger.exception(
                         "Failed to persist developer tool failure"
                     )
                     entry = None

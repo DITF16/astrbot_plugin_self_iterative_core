@@ -1,5 +1,10 @@
 ### 📋 **更新日志 (Changelog)**
 
+### v2.0.3
+
+- 按 AstrBot 日志规范将工具异常记录统一改为 astrbot.api logger。
+- 重构日志读取器为只读宿主 LogBroker.log_cache，移除自建 Python logging Handler 及 root/plugin Logger 挂载，保留 dev_check_logs 的筛选、时间范围和数量限制功能。
+
 ### v2.0.2
 
 - 修正“显示步骤提示”配置：开启后覆盖知识检索、文件读取、备份、写入、加载、测试、日志、回滚和知识维护等全部开发工具，并提示步骤开始、完成或失败。

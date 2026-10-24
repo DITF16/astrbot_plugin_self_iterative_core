@@ -185,22 +185,17 @@ class CoreTests(unittest.TestCase):
         runtime.import_seed(seed.path)
         self.assertEqual(runtime.search("correction")[0]["content"], "local correction")
 
-    def test_logging_bounded_deduplicated_and_shutdown(self):
-        logger = logging.getLogger("astrbot.plugin.self_iterative_test")
-        oldlevel, oldprop = logger.level, logger.propagate
-        self.addCleanup(logger.setLevel, oldlevel)
-        self.addCleanup(setattr, logger, "propagate", oldprop)
-        logger.setLevel(logging.INFO)
-        logger.propagate = False
-        handler = LogManager({"log_max_history": 2})
-        self.addCleanup(handler.shutdown)
-        for n in range(3):
-            logger.info("record %d", n)
-        self.assertEqual(len(handler.get_logs(100)), 2)
-        self.assertIn("record 2", handler.get_logs(0)[0]["data"])
-        handler.shutdown()
-        self.assertNotIn(handler, logger.handlers)
-        self.assertEqual(handler.get_logs(), [])
+    def test_logging_reads_bounded_host_broker_and_shutdown(self):
+        broker = types.SimpleNamespace(log_cache=[
+            {"time": 1, "level": "INFO", "data": "record 1", "plugin_name": "self"},
+            {"time": 2, "level": "INFO", "data": "record 2", "plugin_name": "self"},
+            {"time": 3, "level": "INFO", "data": "record 3", "plugin_name": "self"},
+        ])
+        manager = LogManager({"log_max_history": 2}, broker)
+        self.assertEqual(len(manager.get_logs(100)), 2)
+        self.assertIn("record 3", manager.get_logs(0)[-1]["data"])
+        manager.shutdown()
+        self.assertEqual(manager.get_logs(), [])
 
     def test_broker_preserves_plugin_filter(self):
         broker = types.SimpleNamespace(
