@@ -31,6 +31,7 @@ class DeveloperRuntime:
         self.lock = asyncio.Lock()
         self.logs = None
         self.closed = False
+        self.tasks = {}
 
     async def initialize(self):
         seed = Path(__file__).resolve().parents[1] / "knowledge/seed.sqlite3"
@@ -49,6 +50,39 @@ class DeveloperRuntime:
         return not self.config.get("enable_whitelist", True) or str(
             event.get_sender_id()
         ) in {str(uid) for uid in self.config.get("whitelist_users", [])}
+
+    def active_task_for(self, umo):
+        for task in self.tasks.values():
+            if task.get("umo") == umo and task.get("status") in {"running", "paused"}:
+                return task
+        return None
+
+    def enqueue_interruption(self, event, text):
+        task = self.active_task_for(event.unified_msg_origin)
+        if not task:
+            return None
+        normalized = text.strip()
+        lowered = normalized.lower()
+        if lowered in {"暂停任务", "暂停开发", "pause task", "pause"}:
+            kind = "pause"
+        elif lowered in {"继续任务", "继续开发", "resume task", "resume"}:
+            kind = "resume"
+        elif lowered in {"停止任务", "停止开发", "stop task", "stop"}:
+            kind = "stop"
+        elif any(word in normalized for word in ("增加", "再加", "还要", "改成", "补充", "要求")):
+            kind = "task_addition"
+        else:
+            return None
+        item = {"kind": kind, "text": normalized, "received": time.time()}
+        task["interruptions"].append(item)
+        if kind == "pause":
+            task["status"] = "paused"
+        elif kind == "resume":
+            task["status"] = "running"
+        elif kind == "stop":
+            task["status"] = "stopped"
+        task["updated"] = item["received"]
+        return item
 
     async def references(self, query, purpose):
         rows = await asyncio.to_thread(self.knowledge.search, query, "", 6, purpose)
@@ -94,6 +128,8 @@ class DeveloperRuntime:
                 )
         async with self.lock:
             try:
+                if operation == "dev_start_task":
+                    args = {**args, "umo": event.unified_msg_origin}
                 return await self._execute(operation, args)
             except Exception as exc:
                 try:
@@ -112,6 +148,41 @@ class DeveloperRuntime:
 
     async def _execute(self, operation, args):
         plugin = args.get("plugin_name", "")
+        if operation == "dev_start_task":
+            task_id = str(args.get("task_id", "")).strip() or f"task-{int(time.time())}"
+            self.tasks[task_id] = {
+                "task_id": task_id,
+                "summary": str(args.get("summary", "")).strip(),
+                "umo": str(args.get("umo", "")).strip() or None,
+                "status": "running",
+                "step": str(args.get("step", "")).strip(),
+                "interruptions": [],
+                "updated": time.time(),
+            }
+            return {"ok": True, "task": dict(self.tasks[task_id])}
+        if operation == "dev_task_status":
+            task = self.tasks.get(str(args.get("task_id", "")).strip())
+            return {"ok": bool(task), "task": dict(task) if task else None}
+        if operation in {"dev_pause_task", "dev_resume_task", "dev_stop_task"}:
+            task_id = str(args.get("task_id", "")).strip()
+            task = self.tasks.get(task_id)
+            if not task:
+                return {"ok": False, "error": "Task not found"}
+            task["status"] = {
+                "dev_pause_task": "paused",
+                "dev_resume_task": "running",
+                "dev_stop_task": "stopped",
+            }[operation]
+            task["updated"] = time.time()
+            return {"ok": True, "task": dict(task)}
+        if operation == "dev_take_interruptions":
+            task = self.tasks.get(str(args.get("task_id", "")).strip())
+            if not task:
+                return {"ok": False, "error": "Task not found", "items": []}
+            items = list(task["interruptions"])
+            task["interruptions"].clear()
+            task["updated"] = time.time()
+            return {"ok": True, "items": items, "task": dict(task)}
         if operation == "dev_search_knowledge":
             if args.get("topics"):
                 return {
@@ -349,6 +420,42 @@ def create_tools(runtime):
         "required": ["file_path", "content"],
     }
     definitions = [
+        (
+            "dev_start_task",
+            "Start a resumable development task. Only an active task enables interruption classification.",
+            {"task_id": string, "summary": string, "step": string, "umo": string},
+            ["summary"],
+        ),
+        (
+            "dev_task_status",
+            "Read the current development task state and queued interruptions.",
+            {"task_id": string},
+            ["task_id"],
+        ),
+        (
+            "dev_pause_task",
+            "Pause a development task at a safe tool boundary.",
+            {"task_id": string},
+            ["task_id"],
+        ),
+        (
+            "dev_resume_task",
+            "Resume a paused development task.",
+            {"task_id": string},
+            ["task_id"],
+        ),
+        (
+            "dev_stop_task",
+            "Stop a development task and retain its queued history.",
+            {"task_id": string},
+            ["task_id"],
+        ),
+        (
+            "dev_take_interruptions",
+            "Consume queued task additions and control messages after a tool step.",
+            {"task_id": string},
+            ["task_id"],
+        ),
         (
             "dev_read_knowledge",
             "Read a knowledge entry in 6000-character pages by ID from search results.",

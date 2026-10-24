@@ -20,12 +20,11 @@ CARDS = [
     (
         "plugin-pages",
         "插件页面/WebUI",
-        "使用 AstrBot WebUI 页面管理插件知识库",
+        "AstrBot WebUI 插件页面",
         ["@supplement:plugin-pages"],
-        "页面放在 pages/<name>/index.html，通过 AstrBotPluginView bridge 调用 context.register_web_api 注册的后端接口；页面使用 WebUI 会话身份，后端分页读写并检查修订号。当前示例插件使用 pages 目录。",
+        "页面放在 pages/<name>/index.html，通过 AstrBotPluginView bridge 调用 context.register_web_api 注册的后端接口；页面使用 WebUI 会话身份，后端分页读写并检查修订号。",
         ["插件页面", "知识库页面", "WebUI 管理", "可视化页面"],
         [
-            "views",
             "AstrBotPluginView",
             "register_web_api",
             "request.username",
@@ -72,9 +71,9 @@ CARDS = [
             "plugin-new.md:10",
             "@supplement:host-reload-rules",
         ],
-        "requirements.txt 声明依赖，运行宿主测试；Python 热监听与显式重载的区别及加载结果判断。",
+        "requirements.txt 声明依赖，网络请求使用 aiohttp 或 httpx 等异步库而不是 requests；运行宿主测试，区分 Python 热监听与显式重载，并根据真实加载结果判断插件状态。",
         ["安装依赖", "加载失败", "重载插件", "调试插件", "热重载"],
-        ["requirements.txt", "ASTRBOT_RELOAD", "reload_failed_plugin"],
+        ["requirements.txt", "aiohttp", "httpx", "ASTRBOT_RELOAD", "reload_failed_plugin"],
         ["plugin-release", "lesson-logger"],
     ),
     (

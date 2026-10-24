@@ -47,7 +47,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.context = types.SimpleNamespace(get_all_stars=lambda: [])
-        self.event = types.SimpleNamespace(get_sender_id=lambda: "123")
+        self.event = types.SimpleNamespace(
+            get_sender_id=lambda: "123", unified_msg_origin="test:123"
+        )
         self.runtime = tools.DeveloperRuntime(
             self.context,
             {"enable_whitelist": True, "whitelist_users": ["123"]},
@@ -58,7 +60,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_tool_schemas_construct_and_dispatch(self):
         registered = tools.create_tools(self.runtime)
-        self.assertEqual(len({t.name for t in registered}), 16)
+        self.assertEqual(len({t.name for t in registered}), 22)
         context = types.SimpleNamespace(context=types.SimpleNamespace(event=self.event))
         result = await next(t for t in registered if t.name == "dev_list_plugins").call(
             context
@@ -150,4 +152,21 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.shutdown()
         self.assertFalse(
             (await self.runtime.execute("dev_list_plugins", self.event, {}))["ok"]
+        )
+
+    async def test_task_interruptions_only_run_for_active_task(self):
+        self.assertIsNone(self.runtime.enqueue_interruption(self.event, "暂停任务"))
+        started = await self.runtime.execute(
+            "dev_start_task", self.event, {"summary": "修改 demo"}
+        )
+        task_id = started["task"]["task_id"]
+        item = self.runtime.enqueue_interruption(self.event, "再加一个配置项")
+        self.assertEqual(item["kind"], "task_addition")
+        self.assertEqual(
+            (await self.runtime.execute("dev_pause_task", self.event, {"task_id": task_id}))["task"]["status"],
+            "paused",
+        )
+        self.assertEqual(
+            (await self.runtime.execute("dev_take_interruptions", self.event, {"task_id": task_id}))["items"][0]["text"],
+            "再加一个配置项",
         )

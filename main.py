@@ -139,6 +139,18 @@ class PluginDeveloper(Star):
             )
         )
 
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def collect_task_interruption(self, event: AstrMessageEvent):
+        """Classify only messages belonging to an active development task."""
+        if not self.runtime.allowed(event):
+            return
+        task = self.runtime.active_task_for(event.unified_msg_origin)
+        if not task:
+            return
+        text = str(getattr(event, "message_str", "") or "").strip()
+        if text:
+            self.runtime.enqueue_interruption(event, text)
+
     @filter.command("自迭代测试")
     async def ping(self, event: AstrMessageEvent):
         yield event.plain_result("自迭代核心已加载，配置已生效✅️")
