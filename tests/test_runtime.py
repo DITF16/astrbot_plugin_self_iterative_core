@@ -170,3 +170,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             (await self.runtime.execute("dev_take_interruptions", self.event, {"task_id": task_id}))["items"][0]["text"],
             "再加一个配置项",
         )
+
+    async def test_task_step_updates_after_tool_execution(self):
+        await self.runtime.execute("dev_start_task", self.event, {"summary": "修改 demo"})
+        result = await self.runtime.execute("dev_task_status", self.event, {"task_id": "task-unknown"})
+        self.assertFalse(result["ok"])
+        task = self.runtime.active_task_for("test:123")
+        self.assertEqual(task["step"], "已完成：dev_task_status")

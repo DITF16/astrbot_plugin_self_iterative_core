@@ -57,6 +57,32 @@ class DeveloperRuntime:
                 return task
         return None
 
+    def update_task_step(self, event, operation, status=None):
+        task = self.active_task_for(event.unified_msg_origin)
+        if not task:
+            return
+        task["step"] = operation
+        if status:
+            task["status"] = status
+        task["updated"] = time.time()
+
+    def task_progress_text(self, task):
+        queued = len(task.get("interruptions", []))
+        return (
+            f"任务 {task['task_id']}：{task['status']}；"
+            f"当前步骤：{task.get('step') or '尚未记录'}；"
+            f"待处理插话：{queued} 条"
+        )
+
+    async def classify_task_message(self, event, text):
+        provider_id = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
+        response = await self.context.llm_generate(
+            chat_provider_id=provider_id,
+            prompt="Classify this active-task message. Return exactly one label: progress, task_addition, control, normal. User message: " + text,
+        )
+        label = str(getattr(response, "completion_text", "") or "").strip().lower()
+        return next((x for x in ("progress", "task_addition", "control", "normal") if x in label), "normal")
+
     def enqueue_interruption(self, event, text):
         task = self.active_task_for(event.unified_msg_origin)
         if not task:
@@ -107,19 +133,14 @@ class DeveloperRuntime:
             return {"ok": False, "error": "Plugin runtime has been terminated"}
         if not self.allowed(event):
             return {"ok": False, "error": "当前用户不在开发工具白名单中"}
-        if self.config.get("verbose_steps", True) and operation in {
-            "dev_write_file",
-            "dev_write_files",
-            "dev_load_plugin",
-            "dev_rollback_plugin",
-        }:
+        if self.config.get("verbose_steps", True):
             try:
                 from astrbot.api.event import MessageChain
 
                 await self.context.send_message(
                     event.unified_msg_origin,
                     MessageChain().message(
-                        f"开发操作：{operation} · {args.get('plugin_name', '')}"
+                        f"开发步骤开始：{operation} · {args.get('plugin_name', '')}"
                     ),
                 )
             except Exception:
@@ -130,8 +151,36 @@ class DeveloperRuntime:
             try:
                 if operation == "dev_start_task":
                     args = {**args, "umo": event.unified_msg_origin}
-                return await self._execute(operation, args)
+                self.update_task_step(event, operation)
+                result = await self._execute(operation, args)
+                if operation != "dev_start_task":
+                    self.update_task_step(event, f"已完成：{operation}")
+                if self.config.get("verbose_steps", True):
+                    try:
+                        from astrbot.api.event import MessageChain
+
+                        await self.context.send_message(
+                            event.unified_msg_origin,
+                            MessageChain().message(f"开发步骤完成：{operation}"),
+                        )
+                    except Exception:
+                        logging.getLogger("astrbot").debug(
+                            "Developer completion notification unavailable", exc_info=True
+                        )
+                return result
             except Exception as exc:
+                if self.config.get("verbose_steps", True):
+                    try:
+                        from astrbot.api.event import MessageChain
+
+                        await self.context.send_message(
+                            event.unified_msg_origin,
+                            MessageChain().message(f"开发步骤失败：{operation} · {exc}"),
+                        )
+                    except Exception:
+                        logging.getLogger("astrbot").debug(
+                            "Developer failure notification unavailable", exc_info=True
+                        )
                 try:
                     entry = await asyncio.to_thread(
                         self.knowledge.record_failure,

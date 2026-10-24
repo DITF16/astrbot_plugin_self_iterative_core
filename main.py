@@ -149,6 +149,11 @@ class PluginDeveloper(Star):
             return
         text = str(getattr(event, "message_str", "") or "").strip()
         if text:
+            classification = await self.runtime.classify_task_message(event, text)
+            if classification == "progress":
+                event.set_result(event.plain_result(self.runtime.task_progress_text(task)))
+                event.stop_event()
+                return
             self.runtime.enqueue_interruption(event, text)
 
     @filter.command("自迭代测试")
