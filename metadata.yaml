@@ -1,10 +1,22 @@
 name: astrbot_plugin_self_iterative_core
 display_name: 自迭代核心
-version: 2.0.2
-astrbot_version: ">=4.28.0"
-description: ai自动升级完善自身功能的核心模块
+description: 根据用户要求或自身需求自动完善自身功能、创建相关插件、自动调试优化
 author: DITF16
+author_url: https://github.com/DITF16
 repo: https://github.com/DITF16/astrbot_plugin_self_iterative_core
+tags:
+  - agent
+  - 插件编写
+  - 工具调用
+  - WebUI
+  - 升级
 pages:
   - name: knowledge
     title: 知识库管理
+version: 2.0.2
+astrbot_version: ">=4.26.0"
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - qq_official
+  - weixin_oc
