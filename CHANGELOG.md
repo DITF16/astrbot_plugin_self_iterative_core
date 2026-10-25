@@ -1,5 +1,9 @@
 ### 📋 **更新日志 (Changelog)**
 
+### v2.0.4
+
+- 更新readme文件
+
 ### v2.0.3
 
 - 按 AstrBot 日志规范将工具异常记录统一改为 astrbot.api logger。

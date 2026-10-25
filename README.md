@@ -1,7 +1,6 @@
 # self_iterative_core (自迭代核心插件)
 
 <div align="center">
-
 <img src="https://img.shields.io/badge/AstrBot-Plugin-blue?style=flat&logo=python" alt="AstrBot Plugin">
 <img src="https://img.shields.io/badge/Risk-High-red?style=flat" alt="Risk Level">
 <img src="https://img.shields.io/badge/Status-Experimental-orange" alt="Status">
@@ -17,6 +16,14 @@
 本插件**允许 Bot 在一定范围内完善、修改、升级自身已有的功能，或者按照用户要求创造新功能，逐渐进行自我完善与进化**。它旨在探索 LLM (大语言模型) 在代码生成、自我修正及逻辑迭代方面的潜力，为您带来前所未有的智能体养成体验。
 
 ---
+
+## 💬 社区与交流 | Community
+
+关于本插件更详细的使用技巧请加入作者的交流群和其他用户一起交流：
+
+*   **QQ 群**：DITF16的技术交流群
+*   **点击加入**：<a href="https://qm.qq.com/q/qXk7iOl9FQ">点击链接加入群聊</a>
+*   **支持作者**：如果你喜欢这个项目请给本项目点一个Star⭐，你们的喜欢是作者更新的动力！
 
 ## ✨ 核心特点 | Features
 
@@ -118,15 +125,6 @@
 >
 > 想要自迭代核心修改的功能可以实时生效，**必须开启 AstrBot 的插件热重载机制**。
 > 请通过设置环境变量 `ASTRBOT_RELOAD=1` 来启动 AstrBot 主体。
-
----
-
-## 💬 社区与交流 | Community
-
-如果您是资深玩家，欢迎加入技术交流群分享您的迭代成果或魔改方案。
-
-*   **QQ 群**：DITF16的技术交流群
-*   **点击加入**：<a href="https://qm.qq.com/q/qXk7iOl9FQ">点击链接加入群聊</a>
 
 ---
 
